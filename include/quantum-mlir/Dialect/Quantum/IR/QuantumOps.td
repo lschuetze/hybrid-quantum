@@ -237,7 +237,37 @@ def Quantum_DeallocateOp : Memory_Op<
     ```
     }];
 
-    let arguments = (ins Quantum_QubitType:$input);
+    let arguments = (ins
+      Quantum_QubitType:$input
+    );
+}
+
+def Quantum_ResetOp : Memory_Op<
+        "reset",
+        [
+          MemoryEffects<[
+            MemRead,
+            MemWrite
+          ]>]> {
+    let summary = "Reset a quantum register.";
+    let description = [{
+    Reset qubits.
+
+    Example:
+    
+    ```mlir
+    %q0 = quantum.alloc : !quantum.qubit<5> 
+    %quantum.reset (%q0) : !quantum.qubit<5> -> (!quantum.qubit<5>)
+    ```
+    }];
+
+    let arguments = (ins
+      Quantum_QubitType:$input
+    );
+    
+    let results = (outs
+      Quantum_QubitType:$result
+    );
 }
 
 def Quantum_SplitOp : Memory_Op<
@@ -293,148 +323,6 @@ def Quantum_MergeOp : Memory_Op<
 
     let hasVerifier = 0;
 }
-
-//===----------------------------------------------------------------------===//
-// Quantum control flow operations.
-//===----------------------------------------------------------------------===//
-
-def Quantum_YieldOp : Quantum_Op<
-  "yield",
-  [
-    Pure,
-    ReturnLike,
-    Terminator,
-    ParentOneOf
-    <[
-      "quantum::IfOp"
-    ]>]> {
-  
-  let summary = "Loop yield and terminator operation.";
-
-  let description = [{
-  }];
-
-  let arguments = (ins 
-    Variadic<AnyType>:$results
-  );
-
-  let builders = [
-    OpBuilder<(ins), [{ /* nothing to do */ }]>
-  ];
-
-  let assemblyFormat =
-      [{  attr-dict ($results^ `:` type($results))? }];
-}
-
-def Quantum_IfOp : Quantum_Op<
-  "if",
-  [
-    DeclareOpInterfaceMethods<RegionBranchOpInterface,
-    [
-      "getNumRegionInvocations",
-      "getRegionInvocationBounds",
-      "getEntrySuccessorRegions"
-    ]>,
-    IsolatedFromAbove,
-    SingleBlockImplicitTerminator<"quantum::YieldOp">,
-    RecursiveMemoryEffects,
-    RecursivelySpeculatable,
-    NoClone]> {
-
-  let summary = "Conditional execution. Regions must capture each value defined outside the region that shall be used.";
-
-  let description = [{
-  This operation represents a conditional operation. Based on the conditional `condition` either the `thenBranch` or
-  the `elseBranch` will be executed.
-
-  Values which are defined outside the region must be captured. This operation represents the Gamma operation from
-  the Regionalized Value State Dependence Graph (RVSDG).
-
-  Example:
-
-  ```mlir
-  %qr = quantum.if %b ins(%qin = %q) -> (!quantum.qubit<1>) {
-    %qH = quantum.H (%qin)
-    quantum.yield %qH
-  } else {
-    %qX = quantum.X (%qin)
-    quantum.yield %qX
-  }
-  ```
-
-  }];
-
-  let arguments = (ins
-    I1:$condition,
-    Variadic<AnyType>:$capturedArgs
-  );
-
-  let results = (outs
-    Variadic<AnyType>:$result
-  );
-
-  let regions = (region
-    SizedRegion<1>:$thenRegion,
-    MaxSizedRegion<1>:$elseRegion
-  );
-
-  let skipDefaultBuilders = 1;
-  let builders = [
-    OpBuilder<(ins "Value":$condition,
-      CArg<"ValueRange", "std::nullopt">:$capturedArgs,
-      CArg<"function_ref<void(OpBuilder &, Location, Value, ValueRange)>",
-           "buildTerminatedBody">:$thenBuilder,
-      CArg<"function_ref<void(OpBuilder &, Location, Value, ValueRange)>",
-           "nullptr">:$elseBuilder)>
-  ];
-
-  let extraClassDeclaration = [{
-    OpBuilder getThenBodyBuilder(OpBuilder::Listener *listener = nullptr) {
-      Block *body = getBody(0);
-      return getResults().empty() ? OpBuilder::atBlockTerminator(body, listener)
-                                  : OpBuilder::atBlockEnd(body, listener);
-    }
-
-    OpBuilder getElseBodyBuilder(OpBuilder::Listener *listener = nullptr) {
-      Block *body = getBody(1);
-      return getResults().empty() ? OpBuilder::atBlockTerminator(body, listener)
-                                  : OpBuilder::atBlockEnd(body, listener);
-    }
-
-    Block *thenBlock();
-    quantum::YieldOp thenYield();
-    Block *elseBlock();
-    quantum::YieldOp elseYield();  
-
-    /// Number of conditions variables, always 1 for quantum::IfOp.
-    unsigned getNumConditionVars() { return 1; }
-
-    /// Return the captured region arguments
-    Block::BlockArgListType getRegionCapturedArgs() {
-      return getBody()->getArguments(); //.drop_front(getNumConditionVars());
-    }
-
-    /// Return the `index`-th captured region argument.
-    BlockArgument getRegionCapturedArg(unsigned index) {
-      assert(index < getNumRegionCapturedArgs() &&
-        "expected an index less than the number of captured region args");
-      return getBody()->getArguments().drop_front(getNumConditionVars())[index];
-    }
-
-    /// Number of region arguments for captured values
-    unsigned getNumRegionCapturedArgs() {
-      return getBody()->getNumArguments(); // - getNumConditionVars();
-    }
-
-    /// Return the number of invocations of a region
-    unsigned getNumRegionInvocations() { return 1; }
-  }];
-
-  let hasVerifier = 1;
-  let hasCustomAssemblyFormat = 1;
-}
-
-
 
 //===----------------------------------------------------------------------===//
 // Quantum gate operations.
@@ -580,7 +468,7 @@ def Quantum_CZOp : PrimitiveGate_Op< "CZ", [NoMemoryEffect, AllTypesMatch<["cont
   let results = (outs Quantum_QubitType:$control_out, Quantum_QubitType:$target_out);
 }
 
-def Quantum_SWAPOp : PrimitiveGate_Op<"SWAP",[Hermitian, AllTypesMatch<[ "lhs", "rhs","result1", "result2"]>]> {
+def Quantum_SWAPOp : PrimitiveGate_Op<"SWAP",[Hermitian, AllTypesMatch<[ "lhs", "rhs","result_lhs", "result_rhs"]>]> {
   let summary = "SWAP gate";
   let description = [{
     Swaps the states of two qubits.
@@ -590,8 +478,8 @@ def Quantum_SWAPOp : PrimitiveGate_Op<"SWAP",[Hermitian, AllTypesMatch<[ "lhs", 
     Quantum_QubitType:$rhs
   );
   let results = (outs
-    Quantum_QubitType:$result1,
-    Quantum_QubitType:$result2
+    Quantum_QubitType:$result_lhs,
+    Quantum_QubitType:$result_rhs
   );
 }
 

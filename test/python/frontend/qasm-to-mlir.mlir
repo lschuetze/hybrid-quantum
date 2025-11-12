@@ -1,4 +1,4 @@
-// RUN: %PYTHON qasm-import -i %s | FileCheck %s
+// RUN: %PYTHON qasm-import -t QILLR -i %s | FileCheck %s
 
 // CHECK: module {
 // CHECK: "qillr.gate"() <{function_type = (!qillr.qubit, !qillr.qubit, !qillr.qubit) -> (), sym_name = "unmaj"}> ({
@@ -17,7 +17,7 @@
 // CHECK-NEXT: "qillr.return"() : () -> ()
 // CHECK-NEXT: }) : () -> ()
 
-// CHECK: func.func private @qasm_main() { 
+// CHECK: func.func public @qasm_main() { 
 // CHECK-DAG: %[[a0:.+]] = "qillr.alloc"() : () -> !qillr.qubit
 // CHECK-DAG: "qillr.X"(%[[a0]]) : (!qillr.qubit) -> ()
 // CHECK-DAG: %[[b0:.+]] = "qillr.alloc"() : () -> !qillr.qubit

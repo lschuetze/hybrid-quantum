@@ -3,6 +3,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
+#include <mlir/IR/Dominance.h>
 #include <mlir/IR/IRMapping.h>
 
 namespace mlir {
@@ -14,14 +15,15 @@ namespace mlir {
 
 //===----------------------------------------------------------------------===//
 
-namespace qillr {
+namespace qqt {
 
 void populateConvertQILLRToQuantumPatterns(
     TypeConverter &typeConverter,
     RewritePatternSet &patterns,
-    IRMapping &mapping);
+    IRMapping &mapping,
+    DominanceInfo &domInfo);
 
-} // namespace qillr
+} // namespace qqt
 
 std::unique_ptr<Pass> createConvertQILLRToQuantumPass();
 
