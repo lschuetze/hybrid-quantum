@@ -1,5 +1,5 @@
-add_mlir_conversion_library(QuantumToQILLR
-        QuantumToQILLR.cpp
+add_mlir_conversion_library(ConvertRVSDG
+        RVSDGConversion.cpp
 
     DEPENDS
         ConversionIncGen
@@ -9,10 +9,7 @@ add_mlir_conversion_library(QuantumToQILLR
 
     LINK_LIBS PUBLIC
         MLIRDialectUtils
-        MLIRTransforms
         MLIRTransformUtils
-        QuantumIR
-        QILLRIR
-        RVSDGIR
         MLIRIR
+        RVSDGIR
 )

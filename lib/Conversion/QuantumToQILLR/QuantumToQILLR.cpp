@@ -5,10 +5,12 @@
 
 #include "quantum-mlir/Conversion/QuantumToQILLR/QuantumToQILLR.h"
 
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "quantum-mlir/Conversion/RVSDGConversion/RVSDGConversion.h"
 #include "quantum-mlir/Dialect/QILLR/IR/QILLR.h"
 #include "quantum-mlir/Dialect/QILLR/IR/QILLROps.h"
 #include "quantum-mlir/Dialect/QILLR/IR/QILLRTypes.h"
@@ -18,21 +20,8 @@
 #include "quantum-mlir/Dialect/RVSDG/IR/RVSDGBase.h"
 #include "quantum-mlir/Dialect/RVSDG/IR/RVSDGOps.h"
 
-#include <llvm/ADT/ArrayRef.h>
-#include <llvm/ADT/STLExtras.h>
-#include <llvm/ADT/SmallVector.h>
-#include <llvm/Support/Casting.h>
-#include <llvm/Support/LogicalResult.h>
 #include <mlir/Dialect/Func/IR/FuncOps.h>
 #include <mlir/Dialect/Func/Transforms/OneToNFuncConversions.h>
-#include <mlir/Dialect/Tensor/IR/Tensor.h>
-#include <mlir/IR/BuiltinTypes.h>
-#include <mlir/IR/IRMapping.h>
-#include <mlir/IR/Types.h>
-#include <mlir/IR/Value.h>
-#include <mlir/IR/ValueRange.h>
-#include <mlir/Support/LogicalResult.h>
-#include <optional>
 
 using namespace mlir;
 using namespace mlir::quantum;
@@ -273,60 +262,6 @@ struct ConvertCU1 : public OpConversionPattern<quantum::CU1Op> {
     }
 };
 
-// TODO: In the future this should be reused as we reused the conversion for
-// func.func using populateFuncTypeConversionPatterns
-struct ConvertRVSDGGamma : public OpConversionPattern<rvsdg::GammaNode> {
-    using OpConversionPattern::OpConversionPattern;
-
-    LogicalResult matchAndRewrite(
-        rvsdg::GammaNode op,
-        rvsdg::GammaNodeAdaptor adaptor,
-        ConversionPatternRewriter &rewriter) const override
-    {
-        auto converter = getTypeConverter();
-
-        SmallVector<Type> convertedResultTypes;
-        if (failed(converter->convertTypes(
-                op->getResultTypes(),
-                convertedResultTypes)))
-            return failure();
-
-        auto newGamma = rewriter.create<rvsdg::GammaNode>(
-            op->getLoc(),
-            convertedResultTypes,
-            adaptor.getPredicate(),
-            adaptor.getInputs(),
-            op->getNumRegions());
-
-        for (auto &&[oldRegion, newRegion] :
-             llvm::zip(op->getRegions(), newGamma->getRegions())) {
-            rewriter.inlineRegionBefore(oldRegion, newRegion, newRegion.end());
-        }
-
-        // Change the block argument types of each region
-        for (Region &r : newGamma->getRegions()) {
-            auto newRegion = rewriter.convertRegionTypes(&r, *converter);
-            if (failed(newRegion)) return failure();
-        }
-
-        rewriter.replaceOp(op, newGamma);
-        return success();
-    }
-};
-
-struct ConvertRVSDGYield : public OpConversionPattern<rvsdg::YieldOp> {
-    using OpConversionPattern::OpConversionPattern;
-
-    LogicalResult matchAndRewrite(
-        rvsdg::YieldOp op,
-        rvsdg::YieldOpAdaptor adaptor,
-        ConversionPatternRewriter &rewriter) const override
-    {
-        rewriter.replaceOpWithNewOp<rvsdg::YieldOp>(op, adaptor.getOperands());
-        return success();
-    }
-};
-
 } // namespace
 
 void ConvertQuantumToQILLRPass::runOnOperation()
@@ -343,12 +278,11 @@ void ConvertQuantumToQILLRPass::runOnOperation()
 
     quantum::populateConvertQuantumToQILLRPatterns(typeConverter, patterns);
     populateFuncTypeConversionPatterns(typeConverter, patterns);
+    rvsdg::populateConvertRVSDGPatterns(typeConverter, patterns);
 
     target.addIllegalDialect<quantum::QuantumDialect>();
     target.addLegalDialect<tensor::TensorDialect>();
     target.addLegalDialect<qillr::QILLRDialect>();
-    // target.addLegalDialect<func::FuncDialect>();
-    // target.addLegalDialect<rvsdg::RVSDGDialect>();
     target.addLegalOp<mlir::UnrealizedConversionCastOp>();
     target.addDynamicallyLegalOp<func::FuncOp>([&](func::FuncOp op) {
         return typeConverter.isSignatureLegal(op.getFunctionType());
@@ -387,9 +321,7 @@ void mlir::quantum::populateConvertQuantumToQILLRPatterns(
         ConvertRotationOp<quantum::RzOp, qillr::RzOp>,
         ConvertRotationOp<quantum::PhaseOp, qillr::PhaseOp>,
         ConvertCSwap,
-        ConvertSwap,
-        ConvertRVSDGGamma,
-        ConvertRVSDGYield>(
+        ConvertSwap>(
         typeConverter,
         patterns.getContext(),
         /* benefit*/ 1);
