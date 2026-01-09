@@ -9,6 +9,7 @@ add_mlir_conversion_library(QuantumToQILLR
 
     LINK_LIBS PUBLIC
         MLIRDialectUtils
+        MLIRTransforms
         MLIRTransformUtils
         QuantumIR
         QILLRIR

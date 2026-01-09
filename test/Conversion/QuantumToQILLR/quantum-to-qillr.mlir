@@ -10,7 +10,7 @@ func.func @return_single_qubit() -> tensor<1xi1> {
     // CHECK-DAG: %[[M:.+]] = "qillr.read_measurement"(%[[R]]) : (!qillr.result) -> i1
     // CHECK-DAG: %[[MT:.+]] = tensor.from_elements %[[M]] : tensor<1xi1>
     %m, %q_m = "quantum.measure" (%q) : (!quantum.qubit<1>) -> (tensor<1xi1>, !quantum.qubit<1>)
-    // CHECK-DAG: "qillr.reset"(%[[Q]]) : (!qillr.qubit) -> ()
+    // CHECK-DAG: "qillr.deallocate"(%[[Q]]) : (!qillr.qubit) -> ()
     "quantum.deallocate" (%q_m) : (!quantum.qubit<1>) -> ()
     // CHECK-NEXT: return %[[MT]]
     func.return %m : tensor<1xi1>
@@ -28,7 +28,7 @@ func.func @return_single_measurement_result() -> (tensor<1xi1>) {
     // CHECK-DAG: %[[M:.+]] = "qillr.read_measurement"(%[[R]]) : (!qillr.result) -> i1
     // CHECK-DAG: %[[MT:.+]] = tensor.from_elements %[[M]] : tensor<1xi1>
     %m, %q_m = "quantum.measure" (%q) : (!quantum.qubit<1>) -> (tensor<1xi1>, !quantum.qubit<1>)
-    // CHECK-DAG: "qillr.reset"(%[[Q]]) : (!qillr.qubit) -> ()
+    // CHECK-DAG: "qillr.deallocate"(%[[Q]]) : (!qillr.qubit) -> ()
     "quantum.deallocate" (%q_m) : (!quantum.qubit<1>) -> ()
     // CHECK-DAG: return %[[MT]]
     func.return %m : tensor<1xi1>
@@ -42,7 +42,7 @@ func.func @convertHOp() -> () {
     %q = "quantum.alloc" () : () -> (!quantum.qubit<1>)
     // CHECK-NEXT: "qillr.H"(%[[Q]]) : (!qillr.qubit) -> ()
     %q1 = "quantum.H" (%q) : (!quantum.qubit<1>) -> (!quantum.qubit<1>)
-    // CHECK-DAG: "qillr.reset"(%[[Q]]) : (!qillr.qubit) -> ()
+    // CHECK-DAG: "qillr.deallocate"(%[[Q]]) : (!qillr.qubit) -> ()
     "quantum.deallocate" (%q1) : (!quantum.qubit<1>) -> ()
     // CHECK-NEXT: return
     return
@@ -58,5 +58,15 @@ func.func @convertSwap() -> () {
     %q2 = "quantum.alloc"() : () -> (!quantum.qubit<1>)
     // CHECK-NEXT: "qillr.swap"(%[[Q1]], %[[Q2]]) : (!qillr.qubit, !qillr.qubit) -> ()
     %q1_out, %q2_out = "quantum.SWAP"(%q1, %q2) : (!quantum.qubit<1>, !quantum.qubit<1>) -> (!quantum.qubit<1>, !quantum.qubit<1>)
+    return
+}
+
+// -----
+
+// CHECK-LABEL: func.func @convertFunc(
+// CHECK: %[[Q:.+]]: !qillr.qubit
+func.func @convertFunc(%q : !quantum.qubit<1>) -> () {
+    // CHECK-DAG: "qillr.deallocate"(%[[Q]]) : (!qillr.qubit) -> ()
+    "quantum.deallocate"(%q) : (!quantum.qubit<1>) -> ()
     return
 }
