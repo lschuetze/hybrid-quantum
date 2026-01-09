@@ -78,8 +78,8 @@ func.func @test_qasm_output_correctness() -> ()  {
     "qillr.measure" (%1, %3) : (!qillr.qubit, !qillr.result) -> ()
     %6 = "qillr.read_measurement" (%3) : (!qillr.result) -> i1
 
-    "qillr.reset" (%0) : (!qillr.qubit) -> ()
-    "qillr.reset" (%1) : (!qillr.qubit) -> ()
+    "qillr.deallocate" (%0) : (!qillr.qubit) -> ()
+    "qillr.deallocate" (%1) : (!qillr.qubit) -> ()
     vector.print %6 : i1
     return
   }

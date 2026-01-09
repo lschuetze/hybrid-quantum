@@ -449,7 +449,7 @@ def QILLR_MeasureOp : QILLR_Op<"measure", [MemoryEffects<[MemRead, MemWrite]>]> 
 }
 
 def QILLR_ReadMeasurementOp : QILLR_Op<"read_measurement", [MemoryEffects<[MemRead]>]> {
-  let summary = "Read the measurement value from result memory";
+  let summary = "Read the measurement value from result memory.";
   let description = [{ }];
   
   let arguments = (ins
@@ -460,14 +460,22 @@ def QILLR_ReadMeasurementOp : QILLR_Op<"read_measurement", [MemoryEffects<[MemRe
   );
 }
 
-def QILLR_ResetOp : QILLR_Op<"reset", [MemoryEffects<[MemFree]>]> {
-  let summary = "Resets the qubit in the computational basis";
+def QILLR_ResetOp : QILLR_Op<"reset", [MemoryEffects<[MemRead, MemWrite]>]> {
+  let summary = "Resets the qubit in the computational basis.";
+  let description = [{ }];
+  
+  let arguments = (ins
+    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$input
+  );
+}
+
+def QILLR_DeallocateOp : QILLR_Op<"deallocate", [MemoryEffects<[MemFree]>]> {
+  let summary = "Deallocates the qubit.";
   let description = [{ }];
   
   let arguments = (ins
     Arg<QILLR_QubitType, "", [MemFree]>:$input
   );
 }
-
 
 #endif

@@ -31,6 +31,8 @@
 // CHECK-DAG: llvm.func @__quantum__qis__mz__body(!llvm.ptr, !llvm.ptr)
 // CHECK-DAG: llvm.func @__quantum__qis__read_result__body(!llvm.ptr) -> i1
 // CHECK-DAG: llvm.func @__quantum__qis__reset__body(!llvm.ptr)
+// CHECK-DAG: llvm.func @__quantum__rt__qubit_release(!llvm.ptr)
+
 
 func.func @main() -> (i1) {
   //===----------------------------------------------------------------------===//
@@ -153,6 +155,9 @@ func.func @main() -> (i1) {
 
   "qillr.reset"(%q0) : (!qillr.qubit) -> ()
   // CHECK-DAG: llvm.call @__quantum__qis__reset__body(%[[Q0PTR]]) : (!llvm.ptr) -> ()
+
+  "qillr.deallocate"(%q0) : (!qillr.qubit) -> ()
+  // CHECK-DAG: llvm.call @__quantum__rt__qubit_release(%[[Q0PTR]]) : (!llvm.ptr) -> ()
 
   return %mt : i1
 }
