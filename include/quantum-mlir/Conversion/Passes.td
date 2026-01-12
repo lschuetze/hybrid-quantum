@@ -77,5 +77,20 @@ def ConvertRVSDG : Pass<"convert-rvsdg"> {
   ];
 }
 
+def ConvertRVSDGToScf : Pass<"convert-rvsdg-to-scf"> {
+  let summary = "Transform rvsdg dialect to scf.";
+
+  let description = [{
+    This pass transforms RVSDG dialect to scf.
+  }];
+
+  let constructor = "mlir::createConvertRVSDGToScfPass()";
+
+  let dependentDialects = [
+    "rvsdg::RVSDGDialect",
+    "scf::SCFDialect"
+  ];
+}
+
 
 #endif // QUANTUM_MLIR_CONVERSION_PASSES
