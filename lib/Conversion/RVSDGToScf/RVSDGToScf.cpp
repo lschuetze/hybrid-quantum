@@ -6,15 +6,21 @@
 #include "quantum-mlir/Conversion/RVSDGToScf/RVSDGToScf.h"
 
 #include "mlir/Pass/Pass.h"
+#include "quantum-mlir/Dialect/QILLR/IR/QILLRBase.h"
 #include "quantum-mlir/Dialect/RVSDG/IR/RVSDGAttributes.h"
 #include "quantum-mlir/Dialect/RVSDG/IR/RVSDGBase.h"
 #include "quantum-mlir/Dialect/RVSDG/IR/RVSDGOps.h"
 #include "quantum-mlir/Dialect/RVSDG/IR/RVSDGTypes.h"
 
+#include <algorithm>
+#include <iostream>
+#include <llvm/ADT/STLExtras.h>
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/LogicalResult.h>
 #include <mlir/Dialect/Arith/Utils/Utils.h>
 #include <mlir/Dialect/SCF/IR/SCF.h>
 #include <mlir/IR/BuiltinTypes.h>
+#include <mlir/IR/OperationSupport.h>
 
 using namespace mlir;
 using namespace mlir::rvsdg;
@@ -31,6 +37,21 @@ namespace mlir {
 //===----------------------------------------------------------------------===//
 
 namespace {
+
+bool opResultsEqualOpArgs(rvsdg::GammaNode op)
+{
+    bool result = true;
+    for (auto &region : op.getRegions()) {
+        auto block = &region.front();
+        auto yieldOp = block->getTerminator();
+
+        result &= llvm::all_of_zip(
+            block->getArguments(),
+            yieldOp->getOperands(),
+            [](Value arg, Value res) { return arg == res; });
+    }
+    return result;
+}
 
 struct ConvertRVSDGToScfPass
         : mlir::impl::ConvertRVSDGToScfBase<ConvertRVSDGToScfPass> {
@@ -68,25 +89,50 @@ struct ConvertGamma : public OpConversionPattern<rvsdg::GammaNode> {
         // TODO: We can have more than 2 regions (switch statement)
         if (op->getNumRegions() != 2) return failure();
 
-        auto newIf = rewriter.create<scf::IfOp>(
-            op->getLoc(),
-            op->getResultTypes(),
-            adaptor.getPredicate(),
-            /* addThenBlock */ true,
-            /* addElseBlock */ true);
+        long elseSize = std::distance(
+            op.getRegion(1).getOps().begin(),
+            op.getRegion(1).getOps().end());
 
-        for (auto &&[oldRegion, newRegion] :
-             llvm::zip(op->getRegions(), newIf->getRegions())) {
-            Block* oldBlock = &oldRegion.front();
-            Block* newBlock = &newRegion.front();
+        if (opResultsEqualOpArgs(op) && elseSize == 1) {
+            auto rvsdgYield = op->getRegion(0).front().getTerminator();
+            rewriter.eraseOp(rvsdgYield);
+            // We only return captured arguments and do not have an else branch
+            // Create a simple if without results
+            auto newIf = rewriter.create<scf::IfOp>(
+                op->getLoc(),
+                adaptor.getPredicate(),
+                /* withElseRegion */ false);
+
+            Block* oldBlock = &op->getRegion(0).front();
+            Block* newBlock = &newIf.getThenRegion().front();
             rewriter.inlineBlockBefore(
                 oldBlock,
                 newBlock,
-                newBlock->end(),
+                newBlock->begin(),
                 adaptor.getInputs());
-        }
 
-        rewriter.replaceOp(op, newIf);
+            rewriter.replaceAllUsesWith(op->getResults(), adaptor.getInputs());
+            rewriter.eraseOp(op);
+        } else {
+            auto newIf = rewriter.create<scf::IfOp>(
+                op->getLoc(),
+                op->getResultTypes(),
+                adaptor.getPredicate(),
+                /* addThenBlock */ true,
+                /* addThenBlock */ true);
+
+            for (auto &&[oldRegion, newRegion] :
+                 llvm::zip(op->getRegions(), newIf->getRegions())) {
+                Block* oldBlock = &oldRegion.front();
+                Block* newBlock = &newRegion.front();
+                rewriter.inlineBlockBefore(
+                    oldBlock,
+                    newBlock,
+                    newBlock->begin(),
+                    adaptor.getInputs());
+            }
+            rewriter.replaceOp(op, newIf);
+        }
         return success();
     }
 };
@@ -117,6 +163,7 @@ void ConvertRVSDGToScfPass::runOnOperation()
 
     target.addIllegalDialect<rvsdg::RVSDGDialect>();
     target.addLegalDialect<scf::SCFDialect>();
+    target.addLegalDialect<qillr::QILLRDialect>();
 
     populateConvertRVSDGToScfPatterns(converter, patterns);
 

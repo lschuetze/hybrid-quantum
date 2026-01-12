@@ -32,3 +32,35 @@ func.func @rvdsg_gamma(%b : i1) {
 }
 
  //-------
+
+ // CHECK-LABEL: func.func @rvdsg_gamma_qillr(
+func.func @rvdsg_gamma_qillr(%b : i1) {
+    // CHECK: %[[PRED:.*]] = rvsdg.match
+    %predicate = rvsdg.match(%b : i1) [
+            #rvsdg.matchRule<0 -> 1>,
+            #rvsdg.matchRule<1 -> 0>
+    ] -> !rvsdg.ctrl<2>
+    // CHECK: %[[Q:.*]] = "qillr.alloc"() : () -> !qillr.qubit
+    %q = "quantum.alloc"() : () -> !quantum.qubit<1>
+    // CHECK: %[[QOUT:.*]] = rvsdg.gamma(%[[PRED]] : <2>) (%[[Q]]: !qillr.qubit)
+    %q2 = rvsdg.gamma (%predicate : !rvsdg.ctrl<2>) (%q : !quantum.qubit<1>):[
+        // CHECK: (%[[Q1:.*]]: !qillr.qubit): {
+        (%q: !quantum.qubit<1>):{
+            // CHECK: "qillr.X"(%[[Q1]]) : (!qillr.qubit) -> ()
+            %qX = "quantum.X"(%q): (!quantum.qubit<1>) -> !quantum.qubit<1>
+            // CHECK: rvsdg.yield (%[[Q1]]: !qillr.qubit)
+            rvsdg.yield (%qX:!quantum.qubit<1>)
+        },
+        // CHECK: (%[[Q2:.*]]: !qillr.qubit): {
+        (%q: !quantum.qubit<1>):{
+            // CHECK: rvsdg.yield (%[[Q2]]: !qillr.qubit)
+            rvsdg.yield (%q:!quantum.qubit<1>)
+        }
+    // CHECK: ] -> !qillr.qubit
+    ] -> !quantum.qubit<1>
+    // CHECK: "qillr.H"(%[[QOUT]]) : (!qillr.qubit) -> ()
+    %q3 = "quantum.H" (%q2) : (!quantum.qubit<1>) -> !quantum.qubit<1>
+    // CHECK: "qillr.deallocate"(%[[QOUT]]) : (!qillr.qubit) -> ()
+    "quantum.deallocate" (%q3) : (!quantum.qubit<1>) -> ()
+    return
+}
