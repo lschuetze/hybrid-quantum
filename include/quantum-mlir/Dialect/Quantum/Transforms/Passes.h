@@ -26,10 +26,6 @@ void populateQuantumOptimisePatterns(RewritePatternSet &patterns);
 
 void populateHermitianCancelPatterns(RewritePatternSet &patterns);
 
-void populateMultiQubitLegalizationPatterns(
-    TypeConverter converter,
-    RewritePatternSet &patterns);
-
 void populateScfToRVSDGPatterns(
     TypeConverter converter,
     RewritePatternSet &patterns);
@@ -39,10 +35,6 @@ std::unique_ptr<Pass> createQuantumOptimisePass();
 
 /// Pass that realizes self-adjoint gate cancellation
 std::unique_ptr<Pass> createHermitianCancelPass();
-
-/// Pass that legalizes multi-qubit quantum programs
-/// such that they can be lowered to QILLR
-std::unique_ptr<Pass> createMultiQubitLegalizationPass();
 
 std::unique_ptr<Pass> createScfToRVSDGPass();
 

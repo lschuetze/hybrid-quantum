@@ -31,6 +31,11 @@ class QubitArrayOfSize<int N>
 
 def Quantum_SingleQubitType : QubitArrayOfSize<1>;
 
-def Quantum_MeasurementType : 1DTensorOf<[I1]>;
+def Quantum_MeasurementType : Quantum_Type<"Measurement"> {
+  let mnemonic = "measurement";
+  let summary = "Multi-dimensional measure type";
+  let parameters = (ins "int64_t":$size);
+  let assemblyFormat = "`<` $size `>`";
+}
 
 #endif

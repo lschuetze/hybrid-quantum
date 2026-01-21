@@ -107,32 +107,6 @@ struct ConvertMeasure : public OpConversionPattern<quantum::MeasureOp> {
     }
 }; // struct ConvertMeasure
 
-struct ConvertSingleMeasure
-        : public OpConversionPattern<quantum::MeasureSingleOp> {
-    using OpConversionPattern::OpConversionPattern;
-
-    LogicalResult matchAndRewrite(
-        MeasureSingleOp op,
-        MeasureSingleOpAdaptor adaptor,
-        ConversionPatternRewriter &rewriter) const override
-    {
-        auto loc = op.getLoc();
-
-        auto resultAlloc = rewriter.create<qillr::AllocResultOp>(
-            loc,
-            qillr::ResultType::get(op.getContext()));
-        rewriter.create<qillr::MeasureOp>(loc, adaptor.getInput(), resultAlloc);
-        auto readMeasurement = rewriter.create<qillr::ReadMeasurementOp>(
-            loc,
-            resultAlloc.getResult());
-
-        rewriter.replaceOp(
-            op,
-            {readMeasurement.getResult(), adaptor.getInput()});
-        return success();
-    }
-}; // struct ConvertSingleMeasure
-
 struct ConvertDealloc : public OpConversionPattern<quantum::DeallocateOp> {
     using OpConversionPattern::OpConversionPattern;
 
@@ -307,7 +281,6 @@ void mlir::quantum::populateConvertQuantumToQILLRPatterns(
     patterns.add<
         ConvertAlloc,
         ConvertMeasure,
-        ConvertSingleMeasure,
         ConvertUnaryOp<quantum::ResetOp, qillr::ResetOp>,
         ConvertUnaryOp<quantum::DeallocateOp, qillr::DeallocateOp>,
         ConvertUnaryOp<quantum::HOp, qillr::HOp>,

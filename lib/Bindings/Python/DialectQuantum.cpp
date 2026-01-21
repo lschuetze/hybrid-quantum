@@ -56,6 +56,27 @@ static void populateDialectQuantumSubmodule(nb::module_ m)
         nb::arg("cls"),
         nb::arg("context").none() = nb::none(),
         nb::arg("size"));
+
+    //===--------------------------------------------------------------------===//
+    // MeasurementType
+    //===--------------------------------------------------------------------===//
+    auto measurementType = mlir_type_subclass(
+        m,
+        "QuantumMeasurementType",
+        mlirTypeIsAQuantumMeasurementType);
+
+    measurementType.def_classmethod(
+        "get",
+        [](nb::object cls, MlirContext context, uint64_t size) {
+            CollectDiagnosticsToStringScope scope(context);
+            MlirType type = mlirQuantumMeasurementTypeGet(context, size);
+            if (mlirTypeIsNull(type))
+                throw nb::value_error(scope.takeMessage().c_str());
+            return cls(type);
+        },
+        nb::arg("cls"),
+        nb::arg("context").none() = nb::none(),
+        nb::arg("size"));
 }
 
 NB_MODULE(_mlirDialectsQuantum, m)

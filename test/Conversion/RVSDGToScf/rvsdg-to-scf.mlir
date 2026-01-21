@@ -1,4 +1,4 @@
-// RUN: quantum-opt %s --debug --mlir-print-ir-after-all -split-input-file -convert-rvsdg-to-scf | FileCheck %s
+// RUN: quantum-opt %s -split-input-file -convert-rvsdg-to-scf | FileCheck %s
 
 // CHECK-LABEL: func.func @rvsdg_gamma_to_if(
 // CHECK: %[[B:.*]]: i1)

@@ -9,11 +9,12 @@ func.func @return_single_qubit() -> tensor<1xi1> {
     // CHECK-DAG: "qillr.measure"(%[[Q]], %[[R]]) : (!qillr.qubit, !qillr.result) -> ()
     // CHECK-DAG: %[[M:.+]] = "qillr.read_measurement"(%[[R]]) : (!qillr.result) -> i1
     // CHECK-DAG: %[[MT:.+]] = tensor.from_elements %[[M]] : tensor<1xi1>
-    %m, %q_m = "quantum.measure" (%q) : (!quantum.qubit<1>) -> (tensor<1xi1>, !quantum.qubit<1>)
+    %m, %q_m = "quantum.measure" (%q) : (!quantum.qubit<1>) -> (!quantum.measurement<1>, !quantum.qubit<1>)
+    %mt = "quantum.to_tensor"(%m) : (!quantum.measurement<1>) -> (tensor<1xi1>)
     // CHECK-DAG: "qillr.deallocate"(%[[Q]]) : (!qillr.qubit) -> ()
     "quantum.deallocate" (%q_m) : (!quantum.qubit<1>) -> ()
     // CHECK-NEXT: return %[[MT]]
-    func.return %m : tensor<1xi1>
+    func.return %mt : tensor<1xi1>
 }
 
 // -----
@@ -27,11 +28,12 @@ func.func @return_single_measurement_result() -> (tensor<1xi1>) {
     // CHECK-DAG: "qillr.measure"(%[[Q]], %[[R]]) : (!qillr.qubit, !qillr.result) -> ()
     // CHECK-DAG: %[[M:.+]] = "qillr.read_measurement"(%[[R]]) : (!qillr.result) -> i1
     // CHECK-DAG: %[[MT:.+]] = tensor.from_elements %[[M]] : tensor<1xi1>
-    %m, %q_m = "quantum.measure" (%q) : (!quantum.qubit<1>) -> (tensor<1xi1>, !quantum.qubit<1>)
+    %m, %q_m = "quantum.measure" (%q) : (!quantum.qubit<1>) -> (!quantum.measurement<1>, !quantum.qubit<1>)
+    %mt = "quantum.to_tensor"(%m) : (!quantum.measurement<1>) -> (tensor<1xi1>)
     // CHECK-DAG: "qillr.deallocate"(%[[Q]]) : (!qillr.qubit) -> ()
     "quantum.deallocate" (%q_m) : (!quantum.qubit<1>) -> ()
     // CHECK-DAG: return %[[MT]]
-    func.return %m : tensor<1xi1>
+    func.return %mt : tensor<1xi1>
 }
 
 // -----

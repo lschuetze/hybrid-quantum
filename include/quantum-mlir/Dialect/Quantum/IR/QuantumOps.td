@@ -317,8 +317,7 @@ def Quantum_MergeOp : Memory_Op<
     }];
 
     let arguments = (ins
-        Quantum_QubitType:$lhs,
-        Quantum_QubitType:$rhs
+        Variadic<Quantum_QubitType>:$input
     );
 
     let results = (outs Quantum_QubitType:$result);
@@ -656,31 +655,12 @@ def Quantum_BarrierOp : PrimitiveGate_Op<"barrier", [AllTypesMatch<["input", "re
 //===----------------------------------------------------------------------===//
 // Measurement related gate operations.
 //===----------------------------------------------------------------------===//
-def Quantum_MeasureSingleOp : Memory_Op<"measure_single",[MemoryEffects<[MemRead ]>, AllTypesMatch<["input", "result"]>, NoClone]> {
-    let summary = "Measure a single qubit.";
-    let description = [{ 
-      Return the measurement outcome of a single quibit in the basis dimension.
-      The qubit can no longer be used.
-
-      Example:
-      
-      ```mlir
-      %q0 = quantum.allocate : !quantum.qubit<1>
-      %m, %qm = quantum.measure_single (%q0) : !quantum.qubit<1> -> (i1, !quantum.qubit<1>)
-    }];
-
-    let arguments = (ins Quantum_SingleQubitType:$input);
-    let results = (outs
-      I1:$measurement,
-      Quantum_SingleQubitType:$result
-    );
-}
 
 def Quantum_MeasureOp : Memory_Op< "measure", [MemoryEffects<[MemRead]>,AllTypesMatch<["input", "result"]>, NoClone]> {
     let summary = "Measure a qubit register of size N.";
     let description = [{
       %q0 = quantum.allocate : !quantum.qubit<2>
-      %m, %qm = quantum.measure_single (%q0) : !quantum.qubit<2> -> (tensor<2xi1>, !quantum.qubit<2>)
+      %m, %qm = quantum.measure (%q0) : !quantum.qubit<2> -> (!quantum.measurement<2>, !quantum.qubit<2>)
     }];
 
     let arguments = (ins Quantum_QubitType:$input);
@@ -689,5 +669,11 @@ def Quantum_MeasureOp : Memory_Op< "measure", [MemoryEffects<[MemRead]>,AllTypes
       Quantum_QubitType:$result
     );
 }
+
+def Quantum_ToTensorOp : Quantum_Op<"to_tensor"> {
+  let arguments = (ins Quantum_MeasurementType:$src);
+  let results = (outs 1DTensorOf<[I1]>:$dst);
+}
+
 
 #endif // QUANTUM_OPS

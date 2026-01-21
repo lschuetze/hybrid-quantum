@@ -1,10 +1,12 @@
 // RUN: %PYTHON qasm-import -i %s -r | FileCheck %s
 
-// CHECK: module {
-// CHECK:   qpu.module @qpu {
+// CHECK: "builtin.module"() ({
+// CHECK:   "qpu.module"() <{sym_name = "qpu"}> ({
 // CHECK:       "qpu.circuit"() <{function_type = () -> tensor<1xi1>, sym_name = "main"}> ({
 // CHECK-DAG:    %[[Q0:.+]] = "quantum.alloc"() : () -> !quantum.qubit<1>
-// CHECK-DAG:    %[[M0:.+]], %[[Q1:.+]] = "quantum.measure_single"(%[[Q0]]) : (!quantum.qubit<1>) -> (i1, !quantum.qubit<1>)
+// CHECK-DAG:    %tzero = "arith.constant" [0,0,0,0]
+// CHECK-DAG:    %[[M0:.+]], %[[Q1:.+]] = "quantum.measure"(%[[Q0]]) : (!quantum.qubit<1>) -> (!quantum.measurement<1>, !quantum.qubit<1>)
+// CHECK-DAG:    %tm = quantum.to_tensor(%m)
 // CHECK:    %[[false:.+]] = arith.constant false
 // CHECK-DAG:    %[[cmpi:.+]] = arith.cmpi eq, %[[M0]], %[[false]] : i1
 // CHECK-DAG:    %[[cond:.+]] = rvsdg.match(%[[cmpi]] : i1) [#rvsdg.matchRule<1 -> 0>, #rvsdg.matchRule<0 -> 1>] -> <2>

@@ -26,6 +26,17 @@ MLIR_CAPI_EXPORTED bool mlirTypeIsAQuantumQubitType(MlirType type);
 MLIR_CAPI_EXPORTED MlirType
 mlirQuantumQubitTypeGet(MlirContext ctx, int64_t length);
 
+//===---------------------------------------------------------------------===//
+// MeasurementType
+//===---------------------------------------------------------------------===//
+
+/// Returns `true` if the given type is a quantum::MeasurementType dialect type.
+MLIR_CAPI_EXPORTED bool mlirTypeIsAQuantumMeasurementType(MlirType type);
+
+/// Creates an quantum.MeasurementType type.
+MLIR_CAPI_EXPORTED MlirType
+mlirQuantumMeasurementTypeGet(MlirContext ctx, int64_t length);
+
 #ifdef __cplusplus
 }
 #endif

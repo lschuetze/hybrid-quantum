@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Tools/mlir-translate/Translation.h"
 #include "quantum-mlir/Dialect/QILLR/IR/QILLRBase.h"
@@ -30,5 +32,7 @@ void mlir::qillr::registerQILLRToOpenQASMTranslation()
         [](DialectRegistry &registry) {
             registry.insert<qillr::QILLRDialect>();
             registry.insert<arith::ArithDialect>();
+            registry.insert<tensor::TensorDialect>();
+            registry.insert<scf::SCFDialect>();
         });
 }

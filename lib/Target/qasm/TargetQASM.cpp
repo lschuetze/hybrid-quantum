@@ -21,10 +21,13 @@
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/LogicalResult.h>
 #include <mlir-c/Diagnostics.h>
+#include <mlir/Dialect/SCF/IR/SCF.h>
 #include <mlir/IR/BuiltinOps.h>
 #include <mlir/IR/Diagnostics.h>
 #include <mlir/IR/Operation.h>
+#include <mlir/IR/Visitors.h>
 #include <string>
+
 using namespace mlir;
 using namespace mlir::qillr;
 
@@ -205,6 +208,11 @@ static LogicalResult printU1(QASMEmitter &emitter, U1Op op)
     return success();
 }
 
+static LogicalResult printIfOp(QASMEmitter &emitter, scf::IfOp ifOp)
+{
+    return success();
+}
+
 std::string QASMEmitter::getOrCreateName(Value value)
 {
     if (names.contains(value)) return names[value];
@@ -281,6 +289,9 @@ LogicalResult QASMEmitter::emitOperation(Operation &op)
             .Case<ResetOp>([&](ResetOp reset) {
                 return printPrimitiveGate<ResetOp>(*this, reset, "reset");
             })
+            // Structured Control Flow
+            .Case<scf::IfOp>(
+                [&](scf::IfOp ifOp) { return printIfOp(*this, ifOp); })
             // Ignored ops
             .Case<arith::ConstantOp>([](Operation*) { return success(); })
             .Case<ReadMeasurementOp>([](Operation*) { return success(); })
@@ -295,13 +306,16 @@ LogicalResult qillr::QILLRTranslateToQASM(Operation* op, raw_ostream &os)
 {
     QASMEmitter emitter(os);
 
-    LogicalResult result = success();
     auto walk = op->walk<WalkOrder::PreOrder>([&](Operation* child) {
-        if (failed(result = emitter.emitOperation(*child)))
-            return WalkResult::interrupt();
-        return WalkResult::advance();
+        auto status = emitter.emitOperation(*child);
+
+        if (status.failed())
+            emitError(
+                child->getLoc(),
+                "Interrupt of QILLR to QASM translation.");
+
+        return WalkResult(status);
     });
-    if (walk.wasInterrupted())
-        emitError(op->getLoc(), "Interrupt of QILLR to QASM translation.");
-    return result;
+
+    return failure(walk.wasInterrupted());
 }

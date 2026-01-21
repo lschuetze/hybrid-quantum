@@ -1,4 +1,4 @@
-// RUN: quantum-translate --mlir-to-openqasm %s | FileCheck %s
+// RUN: quantum-translate -split-input-file --mlir-to-openqasm %s | FileCheck %s
 
 module {
   // CHECK: OPENQASM 2.0;
@@ -69,3 +69,21 @@ module {
   // CHECK-NEXT: reset [[q2]];
   "qillr.reset"(%q2) : (!qillr.qubit) -> ()
 }
+
+// -----
+
+// CHECK: qreg [[q:reg.+]][1]; 
+%q = "qillr.alloc"() : () -> !qillr.qubit
+// CHECK-NEXT: creg [[c:reg.+]][1];
+%r = "qillr.ralloc"() : () -> !qillr.result
+ // CHECK-NEXT: measure [[q]] -> [[c]][0];
+"qillr.measure"(%q, %r) : (!qillr.qubit, !qillr.result) -> ()
+// CHECK-NOT: "qillr.read_measurement"
+%b = "qillr.read_measurement"(%r) : (!qillr.result) -> i1
+// CHECK: if([[c]]==1)
+scf.if %b {
+  // CHECK: x [[q]][0];
+  "qillr.X"(%q) : (!qillr.qubit) -> ()
+}
+// CHECK-NOT: "qillr.deallocate"
+"qillr.deallocate"(%q) : (!qillr.qubit) -> ()

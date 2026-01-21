@@ -2,18 +2,19 @@
 
 qpu.module @test {
     // CHECK-SAME
-    "qpu.circuit"() <{function_type = () -> (i1), sym_name = "test_circuit"}>({
+    "qpu.circuit"() <{function_type = () -> (tensor<1xi1>), sym_name = "test_circuit"}>({
         ^bb0():
         %q = "quantum.alloc"() : () -> (!quantum.qubit<1>)
-        %m, %qm = "quantum.measure_single"(%q) : (!quantum.qubit<1>) -> (i1, !quantum.qubit<1>)
+        %m, %qm = "quantum.measure"(%q) : (!quantum.qubit<1>) -> (!quantum.measurement<1>, !quantum.qubit<1>)
+        %mt = "quantum.to_tensor"(%m) : (!quantum.measurement<1>) -> (tensor<1xi1>)
         "quantum.deallocate"(%qm) : (!quantum.qubit<1>) -> ()
-        "qpu.return"(%m) : (i1) -> ()
+        "qpu.return"(%mt) : (tensor<1xi1>) -> ()
     }) : () -> ()
 }
 
-func.func @main() -> i1 {
-    %res = arith.constant false
+func.func @main() -> tensor<1xi1> {
+    %res = tensor.empty() : tensor<1xi1>
     // CHECK-SAME
-    qpu.execute @test::@test_circuit args() outs(%res : i1)
-    func.return %res : i1
+    qpu.execute @test::@test_circuit args() outs(%res : tensor<1xi1>)
+    func.return %res : tensor<1xi1>
 }

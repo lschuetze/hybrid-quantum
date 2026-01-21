@@ -6,12 +6,13 @@ qpu.module @test
         coupling = [[0, 1], [1, 2]]
     >] {
 
-    "qpu.circuit"() <{function_type = (f64) -> (i1), sym_name = "test_circuit"}>({
+    "qpu.circuit"() <{function_type = (f64) -> (tensor<1xi1>), sym_name = "test_circuit"}>({
         ^bb0(%theta : f64):
         %q = "quantum.alloc"() : () -> (!quantum.qubit<1>)
-        %m, %qm = "quantum.measure_single"(%q) : (!quantum.qubit<1>) -> (i1, !quantum.qubit<1>)
+        %m, %qm = "quantum.measure"(%q) : (!quantum.qubit<1>) -> (!quantum.measurement<1>, !quantum.qubit<1>)
+        %tm = "quantum.to_tensor"(%m) : (!quantum.measurement<1>) -> (tensor<1xi1>)
         "quantum.deallocate"(%qm) : (!quantum.qubit<1>) -> ()
-        "qpu.return"(%m) : (i1) -> ()
+        "qpu.return"(%tm) : (tensor<1xi1>) -> ()
     }) : () -> ()
 }
 
