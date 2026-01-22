@@ -552,7 +552,7 @@ class QASMToMLIRVisitor:
                         case ClassicalRegister():
                             # Create a DenseTensor from the axiom to compare against
                             i1 = IntegerType.get_signless(1)
-                            tensor_ty = RankedTensorType.get([4], i1)
+                            tensor_ty = RankedTensorType.get([len(bitOrRegister)], i1)
                             buf = memoryview(bytes(int_to_bits(axiom, len(bitOrRegister))))
                             attr = DenseIntElementsAttr.get(buf, type=tensor_ty)  # type: ignore
                             axiom_tensor = arith.constant(tensor_ty, attr, loc=self.loc, ip=InsertionPoint(self.block))
@@ -560,7 +560,7 @@ class QASMToMLIRVisitor:
                             # Compare the axiom tensor with the register tensor
                             creg = self.visitClassicalRegister(bitOrRegister)
                             cmp = arith.cmpi(CmpIPredicate.eq, creg, axiom_tensor, loc=self.loc, ip=InsertionPoint(self.block))
-                            match = vector.reduction(i1, CombiningKind.AND, cmp)
+                            match = vector.reduction(i1, CombiningKind.AND, cmp, loc=self.loc, ip=InsertionPoint(self.block))
                             return match
                         case _:
                             raise NotImplementedError(f"IfElseOp with condition of type {type(condition)}")
