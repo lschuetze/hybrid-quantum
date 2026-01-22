@@ -2,47 +2,53 @@
 
 // CHECK: "builtin.module"() ({
 // CHECK:   "qpu.module"() <{sym_name = "qpu"}> ({
-// CHECK:       "qpu.circuit"() <{function_type = () -> tensor<1xi1>, sym_name = "main"}> ({
-// CHECK-DAG:    %[[Q0:.+]] = "quantum.alloc"() : () -> !quantum.qubit<1>
-// CHECK-DAG:    %tzero = "arith.constant" [0,0,0,0]
-// CHECK-DAG:    %[[M0:.+]], %[[Q1:.+]] = "quantum.measure"(%[[Q0]]) : (!quantum.qubit<1>) -> (!quantum.measurement<1>, !quantum.qubit<1>)
-// CHECK-DAG:    %tm = quantum.to_tensor(%m)
-// CHECK:    %[[false:.+]] = arith.constant false
-// CHECK-DAG:    %[[cmpi:.+]] = arith.cmpi eq, %[[M0]], %[[false]] : i1
-// CHECK-DAG:    %[[cond:.+]] = rvsdg.match(%[[cmpi]] : i1) [#rvsdg.matchRule<1 -> 0>, #rvsdg.matchRule<0 -> 1>] -> <2>
-// CHECK-DAG:    %[[Q3:.+]] = rvsdg.gamma(%[[cond]] : <2>) (%[[Q1]]: !quantum.qubit<1>) : [
-// CHECK-NEXT:      (%[[arg0:.+]]: !quantum.qubit<1>): {
-// CHECK:        %[[Q4:.+]] = "quantum.X"(%[[arg0]]) : (!quantum.qubit<1>) -> !quantum.qubit<1>
-// CHECK-NEXT:        rvsdg.yield (%[[Q4]]: !quantum.qubit<1>)
-// CHECK-NEXT:      }, 
-// CHECK-NEXT:      (%[[arg1:.+]]: !quantum.qubit<1>): {
-// CHECK-NEXT:        rvsdg.yield (%[[arg1]]: !quantum.qubit<1>)
-// CHECK-NEXT      }
-// CHECK:    ] -> !quantum.qubit<1>
-// CHECK-DAG:    %[[false2:.+]] = arith.constant false
-// CHECK-DAG:    %[[cmpi2:.+]] = arith.cmpi eq, %[[M0]], %[[false2]] : i1
-// CHECK-DAG:    %[[cond2:.+]] = rvsdg.match(%[[cmpi2]] : i1) [#rvsdg.matchRule<1 -> 0>, #rvsdg.matchRule<0 -> 1>] -> <2>
-// CHECK-DAG:    %[[Q5:.+]] = rvsdg.gamma(%[[cond2]] : <2>) (%[[Q3]]: !quantum.qubit<1>) : [
-// CHECK-NEXT:      (%[[arg2:.+]]: !quantum.qubit<1>): {
-// CHECK:        %[[Q6:.+]] = "quantum.X"(%[[arg2]]) : (!quantum.qubit<1>) -> !quantum.qubit<1>
-// CHECK-NEXT:        rvsdg.yield (%[[Q6]]: !quantum.qubit<1>)
-// CHECK-NEXT:      }, 
-// CHECK-NEXT:      (%[[arg3:.+]]: !quantum.qubit<1>): {
-// CHECK-NEXT:        rvsdg.yield (%[[arg3]]: !quantum.qubit<1>)
-// CHECK-NEXT:      }
-// CHECK-NEXT:    ] -> !quantum.qubit<1>
-// CHECK-DAG:    %[[M1:.+]], %[[Q7:.+]] = "quantum.measure_single"(%[[Q5]]) : (!quantum.qubit<1>) -> (i1, !quantum.qubit<1>)
-// CHECK-DAG:    %[[Q8:.+]] = "quantum.reset"(%[[Q7]]) : (!quantum.qubit<1>) -> !quantum.qubit<1>
-// CHECK-DAG:    "quantum.deallocate"(%[[Q8]]) : (!quantum.qubit<1>) -> ()
-// CHECK-DAG:    %[[from_elements:.+]] = tensor.from_elements %[[M1]] : tensor<1xi1>
-// CHECK-NEXT:    "qpu.return"(%[[from_elements]]) : (tensor<1xi1>) -> ()
-// CHECK:       }) : () -> ()
-// CHECK:   }
-// CHECK: func.func public @qasm_main() -> tensor<1xi1> { 
-// CHECK: %[[res:.+]] = tensor.empty() : tensor<1xi1>
-// CHECK: qpu.execute @qpu::@main outs(%[[res]] : tensor<1xi1>)
-// CHECK: return %[[res]] : tensor<1xi1>
-// CHECK: }
+// CHECK:     "qpu.circuit"() <{function_type = () -> tensor<1xi1>, sym_name = "main"}> ({
+// CHECK:      %[[v1:.+]] = "quantum.alloc"() : () -> !quantum.qubit<1>
+// CHECK:      %[[v2:.+]] = "arith.constant"() <{value = dense<false> : tensor<1xi1>}> : () -> tensor<1xi1>
+// CHECK:      %[[v3:.+]]:2 = "quantum.measure"(%[[v1]]) : (!quantum.qubit<1>) -> (!quantum.measurement<1>, !quantum.qubit<1>)
+// CHECK:      %[[v4:.+]] = "quantum.to_tensor"(%[[v3]]#0) : (!quantum.measurement<1>) -> tensor<1xi1>
+// CHECK:      %[[v5:.+]] = "arith.constant"() <{value = 0 : index}> : () -> index
+// CHECK:      %[[v6:.+]] = "tensor.insert_slice"(%[[v4]], %[[v2]], %[[v5]]) <{operandSegmentSizes = array<i32: 1, 1, 1, 0, 0>, static_offsets = array<i64: -1>, static_sizes = array<i64: 1>, static_strides = array<i64: 1>}> : (tensor<1xi1>, tensor<1xi1>, index) -> tensor<1xi1>
+// CHECK:      %[[v7:.+]] = "arith.constant"() <{value = dense<false> : tensor<1xi1>}> : () -> tensor<1xi1>
+// CHECK:      %[[v8:.+]] = "arith.cmpi"(%[[v6]], %[[v7]]) <{predicate = 0 : i64}> : (tensor<1xi1>, tensor<1xi1>) -> tensor<1xi1>
+// CHECK:      %[[v9:.+]] = "vector.reduction"(%[[v8]]) <{fastmath = #arith.fastmath<none>, kind = #vector.kind<and>}> : (tensor<1xi1>) -> i1
+// CHECK:      %[[v10:.+]] = "rvsdg.match"(%[[v9]]) <{mapping = [#rvsdg.matchRule<1 -> 0>, #rvsdg.matchRule<0 -> 1>]}> : (i1) -> !rvsdg.ctrl<2>
+// CHECK:      %[[v11:.+]] = "rvsdg.gamma"(%[[v10]], %[[v3]]#1) ({
+// CHECK:      ^bb0(%[[arg3:.+]]: !quantum.qubit<1>):
+// CHECK:        %[[v24:.+]] = "quantum.X"(%[[arg3]]) : (!quantum.qubit<1>) -> !quantum.qubit<1>
+// CHECK:        "rvsdg.yield"(%[[v24]]) : (!quantum.qubit<1>) -> ()
+// CHECK:      }, {
+// CHECK:      ^bb0(%[[arg2:.+]]: !quantum.qubit<1>):
+// CHECK:        "rvsdg.yield"(%[[arg2]]) : (!quantum.qubit<1>) -> ()
+// CHECK:      }) : (!rvsdg.ctrl<2>, !quantum.qubit<1>) -> !quantum.qubit<1>
+// CHECK:      %[[v12:.+]] = "arith.constant"() <{value = dense<false> : tensor<1xi1>}> : () -> tensor<1xi1>
+// CHECK:      %[[v13:.+]] = "arith.cmpi"(%[[v6]], %[[v12]]) <{predicate = 0 : i64}> : (tensor<1xi1>, tensor<1xi1>) -> tensor<1xi1>
+// CHECK:      %[[v14:.+]] = "vector.reduction"(%[[v13]]) <{fastmath = #arith.fastmath<none>, kind = #vector.kind<and>}> : (tensor<1xi1>) -> i1
+// CHECK:      %[[v15:.+]] = "rvsdg.match"(%[[v14]]) <{mapping = [#rvsdg.matchRule<1 -> 0>, #rvsdg.matchRule<0 -> 1>]}> : (i1) -> !rvsdg.ctrl<2>
+// CHECK:      %[[v16:.+]] = "rvsdg.gamma"(%[[v15]], %[[v11]]) ({
+// CHECK:      ^bb0(%[[arg1:.+]]: !quantum.qubit<1>):
+// CHECK:        %[[v23:.+]] = "quantum.X"(%[[arg1]]) : (!quantum.qubit<1>) -> !quantum.qubit<1>
+// CHECK:        "rvsdg.yield"(%[[v23]]) : (!quantum.qubit<1>) -> ()
+// CHECK:      }, {
+// CHECK:      ^bb0(%[[arg0:.+]]: !quantum.qubit<1>):
+// CHECK:        "rvsdg.yield"(%[[arg0]]) : (!quantum.qubit<1>) -> ()
+// CHECK       }) : (!rvsdg.ctrl<2>, !quantum.qubit<1>) -> !quantum.qubit<1>
+// CHECK:      %[[v17:.+]]:2 = "quantum.measure"(%[[v16]]) : (!quantum.qubit<1>) -> (!quantum.measurement<1>, !quantum.qubit<1>)
+// CHECK:      %[[v18:.+]] = "quantum.to_tensor"(%[[v17]]#0) : (!quantum.measurement<1>) -> tensor<1xi1>
+// CHECK:      %[[v19:.+]] = "arith.constant"() <{value = 0 : index}> : () -> index
+// CHECK:      %[[v20:.+]] = "tensor.insert_slice"(%[[v18]], %[[v6]], %[[v19]]) <{operandSegmentSizes = array<i32: 1, 1, 1, 0, 0>, static_offsets = array<i64: -1>, static_sizes = array<i64: 1>, static_strides = array<i64: 1>}> : (tensor<1xi1>, tensor<1xi1>, index) -> tensor<1xi1>
+// CHECK:      %[[v21:.+]] = "quantum.reset"(%[[v17]]#1) : (!quantum.qubit<1>) -> !quantum.qubit<1>
+// CHECK:      "quantum.deallocate"(%[[v21]]) : (!quantum.qubit<1>) -> ()
+// CHECK:      %[[v22:.+]] = "tensor.from_elements"(%[[v20]]) : (tensor<1xi1>) -> tensor<1xi1>
+// CHECK:      "qpu.return"(%[[v22]]) : (tensor<1xi1>) -> ()
+// CHECK:    }) : () -> ()
+// CHECK:  }) : () -> ()
+// CHECK:  "func.func"() <{function_type = () -> tensor<1xi1>, sym_name = "qasm_main", sym_visibility = "public"}> ({
+// CHECK:    %[[res:.+]] = "tensor.empty"() : () -> tensor<1xi1>
+// CHECK:    "qpu.execute"(%[[res]]) <{circuit = @qpu::@main, operandSegmentSizes = array<i32: 0, 1>}> : (tensor<1xi1>) -> ()
+// CHECK:    "func.return"(%[[res]]) : (tensor<1xi1>) -> ()
+// CHECK:  }) : () -> ()
+// CHECK: }) : () -> ()
 
 OPENQASM 2.0;
 include "qelib1.inc";
