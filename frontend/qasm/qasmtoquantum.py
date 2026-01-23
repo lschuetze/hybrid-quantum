@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_left, bisect_right
+from dataclasses import dataclass, field
 from enum import Enum
 
 from mlir._mlir_libs._mlirDialectsQPU import qpu as qpu_dialect
@@ -83,61 +85,120 @@ type ClbitSpecifier = Clbit | ClassicalRegister
 # Sequence[Union[Clbit, int]],
 
 
+@dataclass(order=True)
+class Interval:
+    start: int
+    end: int
+    value: Value = field(compare=False)
+
+    def contains(self, key: int) -> bool:
+        return self.start <= key <= self.end
+
+    def __len__(self):
+        return self.end - self.start + 1
+
+
+class IntervalMap:
+    def __init__(self):
+        self._intervals: list[Interval] = []
+
+    def __len__(self):
+        return len(self._intervals)
+
+    def get(self, key: int) -> Value | None:
+        starts = [iv.start for iv in self._intervals]
+        i = bisect_right(starts, key) - 1
+        if i >= 0 and self._intervals[i].contains(key):
+            return self._intervals[i].value
+        return None
+
+    def interval_containing(self, key: int) -> Interval:
+        starts = [iv.start for iv in self._intervals]
+        i = bisect_right(starts, key) - 1
+        if i < 0 or key > self._intervals[i].end:
+            raise KeyError(key)
+        return self._intervals[i]
+
+    def add(self, start: int, end: int, value: Value):
+        if start > end:
+            raise ValueError(f"start {start} must be <= end {end}")
+
+        new = Interval(start, end, value)
+        i = bisect_left(self._intervals, new)
+
+        # Check left neighbor
+        if i > 0 and self._intervals[i - 1].end >= start:
+            raise ValueError("Overlapping or touching interval")
+
+        # Check right neighbor
+        if i < len(self._intervals) and self._intervals[i].start <= end:
+            raise ValueError("Overlapping or touching interval")
+
+        self._intervals.insert(i, new)
+
+    def remove(self, start: int, end: int) -> Value:
+        starts = [iv.start for iv in self._intervals]
+        i = bisect_left(starts, start)
+
+        if i < len(self._intervals):
+            iv = self._intervals[i]
+            if iv.start == start and iv.end == end:
+                self._intervals.pop(i)
+                return iv.value
+
+        raise KeyError(f"Interval [{start}, {end}] not found")
+
+    def replace_interval(self, old: Interval, new: list[Interval]):
+        self.remove(old.start, old.end)
+        for iv in new:
+            self.add(iv.start, iv.end, iv.value)
+
+    def __repr__(self):
+        return f"IntervalMap({self._intervals})"
+
+
 class Scope:
-    def __init__(self, visited: dict[str, quantum.GateOp] | None = None) -> None:
-        # Maps circuit quantum registers of size N to quantum.alloc<N> values
-        self.qregs: dict[QuantumRegister, Value | None] = {}
-        # Maps circuit qubit to current quantum.qubit value
-        self.qubits: dict[Qubit, Value | None] = {}
+    def __init__(self):
+        # Maps circuit quantum registers to quantum.qubit values
+        self._registers: dict[QuantumRegister, IntervalMap] = {}
+        # Holds already visited gates that can be reused and have not to be revisited.
+        self._visited_gates: dict[str, quantum.GateOp] = {}
         # Maps circuit classical registers of size N to tensor<1xN> values
         self.cregs: dict[ClassicalRegister, Value | None] = {}
         # Maps circuit classical bit to current quantum.qubit value
         self.clbits: dict[Clbit, Value | None] = {}
-        # Holds already visited gates that can be reused and have not to be revisited.
-        self.visitedGates: dict[str, quantum.GateOp] = visited if visited is not None else {}
 
     @classmethod
-    def fromList(
-        cls,
-        qregs: list[QuantumRegister],
-        cregs: list[ClassicalRegister],
-        visited: dict[str, quantum.GateOp] | None = None,
-    ) -> Scope:
-        s = cls(visited)
-        s.qregs = {qreg: None for qreg in qregs}
-        s.cregs = {creg: None for creg in cregs}
-        return s
+    def from_scope(cls, other: Scope) -> Scope:
+        new = cls()
 
-    @classmethod
-    def fromMap(
-        cls,
-        qregs: dict[QuantumRegister, Value | None],
-        qubits: dict[Qubit, Value | None],
-        cregs: dict[ClassicalRegister, Value | None],
-        clbits: dict[Clbit, Value | None],
-        visited: dict[str, quantum.GateOp] | None = None,
-    ) -> Scope:
-        s = cls(visited)
-        s.qregs = qregs
-        s.qubits = qubits
-        s.cregs = cregs
-        s.clbits = clbits
-        return s
+        # Copy quantum registers + interval maps
+        for qreg, im in other._registers.items():
+            new_im = IntervalMap()
+            for iv in im._intervals:
+                new_im.add(iv.start, iv.end, iv.value)
+            new._registers[qreg] = new_im
 
-    def findAlloc(self, q: QubitSpecifier) -> Value | None:
-        if isinstance(q, QuantumRegister):
-            return self.qregs.get(q)
-        if isinstance(q, Qubit):
-            return self.qubits.get(q)
+        new._visited_gates = dict(other._visited_gates)
+        new.cregs = dict(other.cregs)
+        new.clbits = dict(other.clbits)
 
-    def setQubit(self, q: QubitSpecifier, alloc: Value) -> Value:
-        assert not isinstance(alloc, list)
-        if isinstance(q, QuantumRegister):
-            self.qregs[q] = alloc
-        if isinstance(q, Qubit):
-            self.qubits[q] = alloc
+        return new
 
-        return alloc
+    def intervals(self, reg: QuantumRegister):
+        return self._registers.setdefault(reg, IntervalMap())
+
+    def lookup(self, reg: QuantumRegister, index: int) -> Interval:
+        iv = self.intervals(reg).interval_containing(index)
+        if iv is None:
+            raise KeyError(f"No qubit at index {index}")
+        return iv
+
+    def replace(self, reg: QuantumRegister, old: Interval, new: list[Interval]):
+        imap = self.intervals(reg)
+        imap.remove(old.start, old.end)
+        for iv in new:
+            imap.add(iv.start, iv.end, iv.value)
 
     def findResult(self, c: ClbitSpecifier) -> Value | None:
         if isinstance(c, ClassicalRegister):
@@ -152,10 +213,66 @@ class Scope:
             self.clbits[c] = measurement
 
     def findGate(self, gate: QASM2_Gate) -> quantum.GateOp:
-        return self.visitedGates.get(str(gate.name))
+        return self._visited_gates.get(str(gate.name))
 
     def setGate(self, gate: QASM2_Gate, newGate: quantum.GateOp) -> None:
-        self.visitedGates[str(gate.name)] = newGate
+        self._visited_gates[str(gate.name)] = newGate
+
+    def set_qreg(self, q: QuantumRegister, alloc: Value) -> Value:
+        if q in self._registers:
+            raise ParseError(f"Quantum register {q} already initialized")
+
+        im = IntervalMap()
+        im.add(0, len(q) - 1, alloc)
+        self._registers[q] = im
+        return alloc
+
+    def find_qubit(self, q: Qubit | QuantumRegister) -> Value | None:
+        if isinstance(q, QuantumRegister):
+            im = self._registers.get(q)
+            if im is None:
+                return None
+            if len(im) != 1:
+                raise ParseError(f"Register {q} is fragmented into multiple intervals")
+            return im._intervals[0].value
+
+        if isinstance(q, Qubit):
+            im = self._registers.get(q._register)
+            if im is None:
+                return None
+            return im.get(q._index)
+
+        raise TypeError(q)
+
+    def bind_qubit(self, qreg: QuantumRegister, start: int, end: int, alloc: Value) -> Value:
+        im = self._registers.get(qreg)
+        if im is None:
+            raise ParseError(f"Register {qreg} not initialized")
+
+        # Ensure no overlapping ownership
+        try:
+            iv = im.interval_containing(start)
+            raise ParseError(f"QuantumRegister {qreg} already owned by interval {iv}")
+        except KeyError:
+            pass  # good: slot is free
+
+        im.add(start, end, alloc)
+        return alloc
+
+    def update_qubit(self, q: Qubit, new_value: Value) -> Value:
+        im = self._registers.get(q._register)
+        if im is None:
+            raise ParseError(f"Register {q._register} not initialized")
+
+        iv = im.interval_containing(q._index)
+
+        # Must be exactly a single qubit
+        if iv.start != iv.end:
+            raise ParseError(f"Qubit {q} refers to multi-qubit interval {iv}")
+
+        # Replace interval value
+        iv.value = new_value
+        return new_value
 
 
 class QASMToMLIRVisitor:
@@ -199,51 +316,72 @@ class QASMToMLIRVisitor:
 
     def visitQuantumRegister(self, reg: QuantumRegister) -> Value:
         assert isinstance(reg, QuantumRegister)
-        alloc: Value | None = self.scope.findAlloc(reg)
+        alloc: Value | None = self.scope.find_qubit(reg)
         if alloc is None:
-            size: int = len(reg)
-            assert size >= 1
-            qubitTy: QuantumQubitType = QuantumQubitType.get(self.context, size)
-            qalloc: quantum.AllocOp = quantum.AllocOp(qubitTy, loc=self.loc, ip=InsertionPoint(self.block))
-            return self.scope.setQubit(reg, qalloc.result)
+            qubitTy: QuantumQubitType = QuantumQubitType.get(self.context, len(reg))
+            qalloc: Value = quantum.alloc(qubitTy, loc=self.loc, ip=InsertionPoint(self.block))
+            return self.scope.set_qreg(reg, qalloc)
 
         return alloc
 
     def visitQuantumBit(self, q: Qubit) -> Value:
+        """
+        Return the `!quantum.qubit<1>` value that represents `q`.
+        If `q` is currently represented as a multi-qubit<N> value
+        it wille be split accordingly. The new value is returned.
+        """
         assert isinstance(q, Qubit)
-        val: Value | None = self.scope.findAlloc(q)
-        if val is None:
-            # A qubit value has not been allocated yet.
-            # Check if the qubit register exists.
-            # TODO: Check what happens when we parse a Qiskit circuit (without QASM)
-            reg: Value | None = self.scope.findAlloc(q._register)
-            if reg is None:
-                raise ParseError(f"Register {q._register} for {q} not defined.")
 
-            # If the register has length 1 the qubit and register are identical values
-            if len(q._register) == q._index + 1:
-                return self.scope.setQubit(q, reg)
+        iv: Interval = self.scope.lookup(q._register, q._index)
+        if len(iv) >= 2:
+            # split iv and replace intervals
+            if q._index == 0:
+                # For q[0] we split qreg := q, qs
+                qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
+                qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, len(iv) - 1)
+                split: quantum.SplitOp = quantum.split(
+                    [qubitLTy, qubitRTy], iv.value, loc=self.loc, ip=InsertionPoint(self.block)
+                )
+                ileft: Interval = Interval(q._index, q._index, split[0])
+                iright: Interval = Interval(q._index + 1, iv.end, split[1])
+                self.scope.replace(q._register, iv, [ileft, iright])
+                return ileft.value
+            elif q._index == len(iv) - 1:
+                # for q[n], n == len(q) we split qreg := ql, q
+                qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, len(iv) - 1)
+                qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
+                split: quantum.SplitOp = quantum.SplitOp(
+                    [qubitLTy, qubitRTy], iv.value, loc=self.loc, ip=InsertionPoint(self.block)
+                )
+                ileft: Interval = Interval(iv.start, iv.end - 1, split[0])
+                iright: Interval = Interval(iv.end, iv.end, split[1])
+                self.scope.replace(q._register, iv, [ileft, iright])
+                return iright.value
             else:
-                # We have to split the qubit value from the register.
-                match q._index:
-                    case 0:
-                        qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
-                        qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, len(q._register) - 1)
-                        split: quantum.SplitOp = quantum.SplitOp(
-                            [qubitLTy, qubitRTy], reg, loc=self.loc, ip=InsertionPoint(self.block)
-                        )
-                        return self.scope.setQubit(q, split.result)
-                    case _:
-                        raise ParseError(f"Index > 0 for {q} of type {type(q)} not implemented yet.")
-        else:
-            return val
+                # For q[n], 0 <= n <= len(q) we split qreg := ql, q, qs
+                qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, q._index - iv.start)
+                qubitMidTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
+                qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, iv.end - q._index)
+                split: quantum.SplitOp = quantum.SplitOp(
+                    [qubitLTy, qubitMidTy, qubitRTy], iv.value, loc=self.loc, ip=InsertionPoint(self.block)
+                )
+                ileft: Interval = Interval(iv.start, q._index - 1, split[0])
+                imid: Interval = Interval(q._index, q._index, split[1])
+                iright: Interval = Interval(q._index + 1, iv.end, split[2])
+                self.scope.replace(q._register, iv, [ileft, imid, iright])
+                return imid.value
+
+        qv: Value | None = self.scope.find_qubit(q)
+        if qv is None:
+            raise ParseError(f"Error while retrieving SSA value for {q}")
+        return qv
 
     def visitClassicalRegister(self, creg: ClassicalRegister) -> Value:
         assert isinstance(creg, ClassicalRegister)
         calloc: Value | None = self.scope.findResult(creg)
         if calloc is None:
             i1 = IntegerType.get_signless(1)
-            tensor_ty = RankedTensorType.get([4], i1)
+            tensor_ty = RankedTensorType.get([len(creg)], i1)
             buf = memoryview(bytes([0]))  # 8 zero bits
             attr = DenseIntElementsAttr.get(buf, type=tensor_ty)  # type: ignore
             zero = arith.constant(tensor_ty, attr, loc=self.loc, ip=InsertionPoint(self.block))
@@ -274,7 +412,7 @@ class QASMToMLIRVisitor:
                     outTy = [arg.type for arg in args]
                     outs: list[Value] = quantum.BarrierOp(outTy, args, ip=InsertionPoint(self.block)).result
                     for q, r in zip(qubits, outs):
-                        self.scope.setQubit(q, r)
+                        self.scope.update_qubit(q, r)
             case QASM2_Gate(), _:
                 self._visitDefinedGate(instr, qubits, clbits)
             case IfElseOp(), _:
@@ -285,18 +423,18 @@ class QASMToMLIRVisitor:
                     control2: Value = self.visitQuantumBit(qubits[1])
                     target: Value = self.visitQuantumBit(qubits[2])
                     ccx: quantum.CCXOp = quantum.CCXOp(control1, control2, target, ip=InsertionPoint(self.block))
-                    self.scope.setQubit(qubits[0], ccx.control1_out)
-                    self.scope.setQubit(qubits[1], ccx.control2_out)
-                    self.scope.setQubit(qubits[2], ccx.target_out)
+                    self.scope.update_qubit(qubits[0], ccx.control1_out)
+                    self.scope.update_qubit(qubits[1], ccx.control2_out)
+                    self.scope.update_qubit(qubits[2], ccx.target_out)
             case lib.CSwapGate(), 3:
                 with self.loc:
                     control: Value = self.visitQuantumBit(qubits[0])
                     lhs: Value = self.visitQuantumBit(qubits[1])
                     rhs: Value = self.visitQuantumBit(qubits[2])
                     cswap: quantum.CSWAPOp = quantum.CSWAPOp(control, lhs, rhs, ip=InsertionPoint(self.block))
-                    self.scope.setQubit(qubits[0], cswap.control_out)
-                    self.scope.setQubit(qubits[1], cswap.lhs_out)
-                    self.scope.setQubit(qubits[2], cswap.rhs_out)
+                    self.scope.update_qubit(qubits[0], cswap.control_out)
+                    self.scope.update_qubit(qubits[1], cswap.lhs_out)
+                    self.scope.update_qubit(qubits[2], cswap.rhs_out)
             case _, 1:
                 self._visitUnaryGates(instr, qubits, clbits)
             case _, 2:
@@ -315,74 +453,74 @@ class QASMToMLIRVisitor:
                     match instr:
                         case lib.XGate():
                             op: quantum.XOp = quantum.XOp(target, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.YGate():
                             op: quantum.YOp = quantum.YOp(target, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.ZGate():
                             op: quantum.ZOp = quantum.ZOp(target, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.HGate():
                             op: quantum.HOp = quantum.HOp(target, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.SGate():
                             op: quantum.SOp = quantum.SOp(target, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.SXGate():
                             op: quantum.SXOp = quantum.SXOp(target, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.SdgGate():
                             op: quantum.SdgOp = quantum.SdgOp(target, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.TGate():
                             op: quantum.TOp = quantum.TOp(target, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.TdgGate():
                             op: quantum.TdgOp = quantum.TdgOp(target, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.RZGate():
                             angle = self.visitClassic(instr.params[0])
                             op: quantum.RzOp = quantum.RzOp(target, angle, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.RXGate():
                             angle = self.visitClassic(instr.params[0])
                             op: quantum.RxOp = quantum.RxOp(target, angle, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.RYGate():
                             angle = self.visitClassic(instr.params[0])
                             op: quantum.RyOp = quantum.RyOp(target, angle, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.U3Gate():
                             theta, phi, lam = [self.visitClassic(param) for param in instr.params]
                             op: quantum.U3Op = quantum.U3Op(target, theta, phi, lam, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.U2Gate():
                             phi, lam = [self.visitClassic(param) for param in instr.params]
                             op: quantum.U2Op = quantum.U2Op(target, phi, lam, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.U1Gate():
                             lam = self.visitClassic(instr.params[0])
                             op: quantum.U1Op = quantum.U1Op(target, lam, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.UGate():
                             # TODO: https://docs.quantum.ibm.com/api/qiskit/qiskit.circuit.library.UGate
                             theta, phi, lam = [self.visitClassic(param) for param in instr.params]
                             op: quantum.U3Op = quantum.U3Op(target, theta, phi, lam, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.Reset():
                             outTy = QuantumQubitType.get(self.context, 1)
                             op: quantum.ResetOp = quantum.ResetOp(outTy, target, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.Measure():
                             assert len(clbits) == 1
                             self._visitMeasure(instr, target, qubits[0], clbits[0])
                         case lib.IGate():
                             op: quantum.IdOp = quantum.IdOp(target, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case lib.PhaseGate():
                             angle = self.visitClassic(instr.params[0])
                             op: quantum.PhaseOp = quantum.PhaseOp(target, angle, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result)
+                            self.scope.update_qubit(qubits[0], op.result)
                         case _:
                             raise NotImplementedError(f"Unary gate {instr}")
 
@@ -398,31 +536,31 @@ class QASMToMLIRVisitor:
                     match instr:
                         case lib.SwapGate():
                             op: quantum.SWAPOp = quantum.SWAPOp(lhs, rhs, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.result_lhs)
-                            self.scope.setQubit(qubits[1], op.result_rhs)
+                            self.scope.update_qubit(qubits[0], op.result_lhs)
+                            self.scope.update_qubit(qubits[1], op.result_rhs)
                         case lib.CZGate():
                             op: quantum.CZOp = quantum.CZOp(lhs, rhs, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.control_out)
-                            self.scope.setQubit(qubits[1], op.target_out)
+                            self.scope.update_qubit(qubits[0], op.control_out)
+                            self.scope.update_qubit(qubits[1], op.target_out)
                         case lib.CXGate():
                             op: quantum.CNOTOp = quantum.CNOTOp(lhs, rhs, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.control_out)
-                            self.scope.setQubit(qubits[1], op.target_out)
+                            self.scope.update_qubit(qubits[0], op.control_out)
+                            self.scope.update_qubit(qubits[1], op.target_out)
                         case lib.CRYGate():
                             angle = self.visitClassic(instr.params[0])
                             op: quantum.CRyOp = quantum.CRyOp(lhs, rhs, angle, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.control_out)
-                            self.scope.setQubit(qubits[1], op.target_out)
+                            self.scope.update_qubit(qubits[0], op.control_out)
+                            self.scope.update_qubit(qubits[1], op.target_out)
                         case lib.CRZGate():
                             angle = self.visitClassic(instr.params[0])
                             op: quantum.CRzOp = quantum.CRzOp(lhs, rhs, angle, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.control_out)
-                            self.scope.setQubit(qubits[1], op.target_out)
+                            self.scope.update_qubit(qubits[0], op.control_out)
+                            self.scope.update_qubit(qubits[1], op.target_out)
                         case lib.CU1Gate():
                             angle = self.visitClassic(instr.params[0])
                             op: quantum.CU1Op = quantum.CU1Op(lhs, rhs, angle, ip=InsertionPoint(self.block))
-                            self.scope.setQubit(qubits[0], op.control_out)
-                            self.scope.setQubit(qubits[1], op.target_out)
+                            self.scope.update_qubit(qubits[0], op.control_out)
+                            self.scope.update_qubit(qubits[1], op.target_out)
 
     def _visitMeasure(self, instr: lib.Measure, target: Value, qubit: QubitSpecifier, clbit: ClbitSpecifier) -> None:
         assert isinstance(clbit, Clbit)
@@ -431,7 +569,7 @@ class QASMToMLIRVisitor:
         measurementTy: QuantumMeasurementType = QuantumMeasurementType.get(self.context, 1)
         qubitTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
         op: quantum.MeasureOp = quantum.MeasureOp(measurementTy, qubitTy, target, ip=InsertionPoint(self.block))
-        self.scope.setQubit(qubit, op.result)
+        self.scope.update_qubit(qubit, op.result)
         # Create the tensor holding the result value
         i1 = IntegerType.get_signless(1)
         tensor_ty = RankedTensorType.get([1], i1)
@@ -452,7 +590,7 @@ class QASMToMLIRVisitor:
             loc=self.loc,
             ip=InsertionPoint(self.block),
         )
-        self.scope.setResult(creg, creg_tensor)
+        self.scope.setResult(clbit._register, creg_tensor)
 
     def _visitDefinedGate(self, instr: QASM2_Gate, qubits: list[QubitSpecifier], clbits: list[ClbitSpecifier]) -> None:
         if instr.definition is not None:
@@ -471,19 +609,21 @@ class QASMToMLIRVisitor:
 
                 self.scope.setGate(instr, gate)
                 circuit: QuantumCircuit = instr.definition
-                gateQubits = {q: v for q, v in zip(circuit.qubits, gate.body.blocks[0].arguments)}
-                innerGateScope: Scope = Scope.fromMap(self.scope.qregs, gateQubits, {}, {}, self.scope.visitedGates)
-                visitor: QASMToMLIRVisitor = QASMToMLIRVisitor.fromParent(self, block=gateBody, scope=innerGateScope)
+                inner_gate_scope: Scope = Scope.from_scope(self.scope)
+                for q, v in zip(circuit.qubits, gate.body.blocks[0].arguments):
+                    inner_gate_scope.update_qubit(q, v)
+
+                visitor: QASMToMLIRVisitor = QASMToMLIRVisitor.fromParent(self, block=gateBody, scope=inner_gate_scope)
                 visitor.visitCircuit(circuit)
-                quantum.ReturnOp([visitor.visitQuantumBit(q) for q in gateQubits], loc=self.loc, ip=InsertionPoint(gateBody))
-            # Construct quantum.CallOp for defined custom gate
-            # TODO: qpu.circuit instead of GateOp
+
+                quantum.ReturnOp([visitor.visitQuantumBit(q) for q in circuit.qubits], loc=self.loc, ip=InsertionPoint(gateBody))
+
             callee: StringAttr = instr.name
             operands: list[Value] = [self.visitQuantumBit(q) for q in qubits]
             outTys: list[Type] = [o.type for o in operands]
             op: quantum.GateCallOp = quantum.GateCallOp(outTys, callee, operands, loc=self.loc, ip=InsertionPoint(self.block))
             for inq, outq in zip(qubits, op.results):
-                self.scope.setQubit(inq, outq)
+                self.scope.update_qubit(inq, outq)
         else:
             ParseError(f"Expected gate with definition, got: {instr}")
 
@@ -505,26 +645,18 @@ class QASMToMLIRVisitor:
             inputTypes = [inp.type for inp in inputs]
 
             thenBlock: Block = ifOp.regions[0].blocks.append(*inputTypes, arg_locs=[self.loc] * len(inputTypes))
-            thenScope: Scope = Scope.fromMap(
-                qregs=self.scope.qregs,
-                qubits={q: v for q, v in zip(qubits, iter_block_args(thenBlock.arguments))},
-                cregs=self.scope.cregs,
-                clbits=self.scope.clbits,
-                visited=self.scope.visitedGates,
-            )
-            thenVisitor = QASMToMLIRVisitor.fromParent(self, block=thenBlock, scope=thenScope)
+            then_scope: Scope = Scope.from_scope(self.scope)
+            for q, v in zip(qubits, iter_block_args(thenBlock.arguments)):
+                then_scope.update_qubit(q, v)
+            thenVisitor = QASMToMLIRVisitor.fromParent(self, block=thenBlock, scope=then_scope)
             thenVisitor.visitCircuit(true_body)
             rvsdg.YieldOp([thenVisitor.visitQuantumBit(q) for q in qubits], ip=InsertionPoint(thenBlock))
 
             elseBlock: Block = ifOp.regions[1].blocks.append(*inputTypes, arg_locs=[self.loc] * len(inputTypes))
-            elseScope: Scope = Scope.fromMap(
-                qregs=self.scope.qregs,
-                qubits={q: v for q, v in zip(qubits, iter_block_args(elseBlock.arguments))},
-                cregs=self.scope.cregs,
-                clbits=self.scope.clbits,
-                visited=self.scope.visitedGates,
-            )
-            elseVisitor = QASMToMLIRVisitor.fromParent(self, block=elseBlock, scope=elseScope)
+            else_scope: Scope = Scope.from_scope(self.scope)
+            for q, v in zip(qubits, iter_block_args(elseBlock.arguments)):
+                else_scope.update_qubit(q, v)
+            elseVisitor = QASMToMLIRVisitor.fromParent(self, block=elseBlock, scope=else_scope)
             if hasElse:
                 # Visit the else circuit only if it exists
                 elseVisitor.visitCircuit(false_body)
@@ -533,7 +665,7 @@ class QASMToMLIRVisitor:
 
             # Update qubits with returned values
             for inq, outv in zip(qubits, ifOp.outputs):
-                self.scope.setQubit(inq, outv)
+                self.scope.update_qubit(inq, outv)
 
     def _visitIfElseCondition(
         self,
@@ -617,7 +749,7 @@ def QASMToMLIR(code: str, emitResults: bool) -> Module:
         qpu_main: qpu.CircuitOp = qpu.CircuitOp(circuit_name, TypeAttr.get(empty_functy))
         qpu_main.body.blocks.append()
 
-        scope: Scope = Scope.fromList(circuit.qregs, circuit.cregs)
+        scope: Scope = Scope()
         visitor: QASMToMLIRVisitor = QASMToMLIRVisitor(compat, context, device, location, qpu_main.body.blocks[0], scope)
         visitor.visitCircuit(circuit, emitRegisters=True)
 
