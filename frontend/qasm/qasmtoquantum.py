@@ -335,7 +335,7 @@ class QASMToMLIRVisitor:
         iv: Interval = self.scope.lookup(q._register, q._index)
         if len(iv) >= 2:
             # split iv and replace intervals
-            if q._index == 0:
+            if q._index == iv.start:
                 # For q[0] we split qreg := q, qs
                 qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
                 qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, len(iv) - 1)
