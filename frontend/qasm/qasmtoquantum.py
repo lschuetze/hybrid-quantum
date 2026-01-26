@@ -21,6 +21,7 @@ from mlir.dialects.arith import CmpIPredicate
 from mlir.dialects.builtin import (
     Block,
     BlockArgumentList,
+    DenseElementsAttr,
     DenseIntElementsAttr,
     FunctionType,
     IndexType,
@@ -33,6 +34,7 @@ from mlir.ir import (
     Context,
     F64Type,
     InsertionPoint,
+    IntegerAttr,
     Location,
     Module,
     StringAttr,
@@ -685,10 +687,18 @@ class QASMToMLIRVisitor:
                             # Create a DenseTensor from the axiom to compare against
                             i1 = IntegerType.get_signless(1)
                             tensor_ty = RankedTensorType.get([len(bitOrRegister)], i1)
-                            buf = memoryview(bytes(int_to_bits(axiom, len(bitOrRegister))))
-                            attr = DenseIntElementsAttr.get(buf, type=tensor_ty)  # type: ignore
-                            axiom_tensor = arith.constant(tensor_ty, attr, loc=self.loc, ip=InsertionPoint(self.block))
+                            if axiom == 0:
+                                elem = IntegerAttr.get(i1, 0)
+                                attr = DenseElementsAttr.get_splat(shaped_type=tensor_ty, element_attr=elem)
+                            else:
+                                bits = int_to_bits(axiom, len(bitOrRegister))
+                                # buf = memoryview(bytes(bits))
+                                attrs = [IntegerAttr.get(i1, b) for b in bits]
+                                attr = DenseIntElementsAttr.get(attrs=attrs, type=tensor_ty, context=self.context)  # type: ignore
+                                # attr = DenseElementsAttr.get(buf, type=i1, context=self.context) # type: ignore
+                                # , shape=[size])
 
+                            axiom_tensor = arith.constant(tensor_ty, attr, loc=self.loc, ip=InsertionPoint(self.block))
                             # Compare the axiom tensor with the register tensor
                             creg = self.visitClassicalRegister(bitOrRegister)
                             cmp = arith.cmpi(CmpIPredicate.eq, creg, axiom_tensor, loc=self.loc, ip=InsertionPoint(self.block))

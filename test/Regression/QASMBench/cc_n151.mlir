@@ -2,8 +2,6 @@
 // RUN: quantum-opt -inline | \
 // RUN: FileCheck %s
 //
-// -hoist-load-store -eliminate-load-store
-//-replace-repeated-reads
 //--debug --mlir-print-ir-after-all
 
 // CHECK-LABEL: qasm_main
