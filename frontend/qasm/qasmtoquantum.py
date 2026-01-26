@@ -16,7 +16,7 @@ from mlir._mlir_libs._mlirDialectsQuantum import QuantumMeasurementType, Quantum
 from mlir._mlir_libs._mlirDialectsQuantum import quantum as quantum_dialect
 from mlir._mlir_libs._mlirDialectsRVSDG import ControlType, MatchRuleAttr
 from mlir._mlir_libs._mlirDialectsRVSDG import rvsdg as rvsdg_dialect
-from mlir.dialects import arith, func, qpu, quantum, rvsdg, tensor, vector
+from mlir.dialects import arith, func, qpu, quantum, rvsdg, scf, tensor
 from mlir.dialects.arith import CmpIPredicate
 from mlir.dialects.builtin import (
     Block,
@@ -28,7 +28,6 @@ from mlir.dialects.builtin import (
     IntegerType,
     RankedTensorType,
 )
-from mlir.dialects.vector import CombiningKind
 from mlir.ir import (
     ArrayAttr,
     Context,
@@ -578,15 +577,15 @@ class QASMToMLIRVisitor:
         result_tensor = quantum.to_tensor(tensor_ty, op.measurement, loc=self.loc, ip=InsertionPoint(self.block))
         # Insert the result into the register
         creg = self.visitClassicalRegister(clbit._register)
-        offset = index_const(clbit._index, context=self.context, loc=self.loc, ip=InsertionPoint(self.block))
+        # offset = index_const(, context=self.context, loc=self.loc, ip=InsertionPoint(self.block))
 
         creg_tensor = tensor.insert_slice(
             source=result_tensor,
             dest=creg,
-            offsets=[offset],  # dynamic offset
+            offsets=[],  # no dynamic offset
             sizes=[],  # no dynamic sizes
             strides=[],  # no dynamic strides
-            static_offsets=[-1],  # -1 means "use operand"
+            static_offsets=[clbit._index],  # compile-time constant
             static_sizes=[1],  # compile-time constant
             static_strides=[1],  # compile-time constant
             loc=self.loc,
@@ -686,7 +685,8 @@ class QASMToMLIRVisitor:
                         case ClassicalRegister():
                             # Create a DenseTensor from the axiom to compare against
                             i1 = IntegerType.get_signless(1)
-                            tensor_ty = RankedTensorType.get([len(bitOrRegister)], i1)
+                            size = len(bitOrRegister)
+                            tensor_ty = RankedTensorType.get([size], i1)
                             if axiom == 0:
                                 elem = IntegerAttr.get(i1, 0)
                                 attr = DenseElementsAttr.get_splat(shaped_type=tensor_ty, element_attr=elem)
@@ -695,15 +695,41 @@ class QASMToMLIRVisitor:
                                 # buf = memoryview(bytes(bits))
                                 attrs = [IntegerAttr.get(i1, b) for b in bits]
                                 attr = DenseIntElementsAttr.get(attrs=attrs, type=tensor_ty, context=self.context)  # type: ignore
-                                # attr = DenseElementsAttr.get(buf, type=i1, context=self.context) # type: ignore
-                                # , shape=[size])
 
                             axiom_tensor = arith.constant(tensor_ty, attr, loc=self.loc, ip=InsertionPoint(self.block))
                             # Compare the axiom tensor with the register tensor
                             creg = self.visitClassicalRegister(bitOrRegister)
                             cmp = arith.cmpi(CmpIPredicate.eq, creg, axiom_tensor, loc=self.loc, ip=InsertionPoint(self.block))
-                            match = vector.reduction(i1, CombiningKind.AND, cmp, loc=self.loc, ip=InsertionPoint(self.block))
-                            return match
+                            # Work on result tensor based on its length
+                            if size == 1:
+                                # Directly extract the single element
+                                idx = index_const(0, context=self.context, loc=self.loc, ip=InsertionPoint(self.block))
+                                extr = tensor.extract(cmp, [idx], loc=self.loc, ip=InsertionPoint(self.block))
+                                return extr
+                            else:
+                                # Logical AND all tensor components
+                                init = arith.constant(i1, 1, loc=self.loc, ip=InsertionPoint(self.block))
+                                lb = index_const(0, context=self.context, loc=self.loc, ip=InsertionPoint(self.block))
+                                ub = index_const(size, context=self.context, loc=self.loc, ip=InsertionPoint(self.block))
+                                step = index_const(1, context=self.context, loc=self.loc, ip=InsertionPoint(self.block))
+                                parallel = scf.ParallelOp(
+                                    [i1], [lb], [ub], [step], [init], loc=self.loc, ip=InsertionPoint(self.block)
+                                )
+                                index_ty = IndexType.get(self.context)
+                                body = Block.create_at_start(parallel.region, arg_types=[index_ty])
+                                with InsertionPoint(body):
+                                    iv = body.arguments[0]
+                                    elem = tensor.extract(cmp, [iv], loc=self.loc)
+
+                                    reduce = scf.ReduceOp([elem, init], 1, loc=self.loc)
+                                    reduce_block = Block.create_at_start(reduce.regions[0], arg_types=[i1, i1])
+                                    with InsertionPoint(reduce_block):
+                                        lhs = reduce_block.arguments[0]
+                                        rhs = reduce_block.arguments[1]
+                                        r = arith.andi(lhs, rhs, loc=self.loc)
+                                        scf.reduce_return(r)
+
+                                return parallel.results[0]
                         case _:
                             raise NotImplementedError(f"IfElseOp with condition of type {type(condition)}")
 
@@ -811,6 +837,7 @@ def int_to_bits(x: int, n: int) -> list[int]:
     return [(x >> i) & 1 for i in range(n)]
 
 
+# TODO: Replace by arith.ConstantOp.create_index()
 def index_const(v: int, *, context: Context, loc: Location, ip: InsertionPoint) -> Value:
     return arith.ConstantOp(
         IndexType.get(context),
