@@ -9,11 +9,11 @@
 // CHECK:       %[[q4:.*]]:2 = "quantum.split"(%[[q1]]) : (!quantum.qubit<2>) -> (!quantum.qubit<1>, !quantum.qubit<1>)
 // CHECK:       %[[q5:.*]]:2 = "quantum.measure"(%[[q4]]#0) : (!quantum.qubit<1>) -> (!quantum.measurement<1>, !quantum.qubit<1>)
 // CHECK:       %[[q6:.*]] = "quantum.to_tensor"(%[[q5]]#0) : (!quantum.measurement<1>) -> tensor<1xi1>
-// CHECK:       %[[q7:.*]] = "arith.constant"() <{value = 0 : index}> : () -> index
-// CHECK:       %[[q8:.*]] = "tensor.insert_slice"(%[[q6]], %[[q2]], %[[q7]]) <{operandSegmentSizes = array<i32: 1, 1, 1, 0, 0>, static_offsets = array<i64: -1>, static_sizes = array<i64: 1>, static_strides = array<i64: 1>}> : (tensor<1xi1>, tensor<1xi1>, index) -> tensor<1xi1>
+// CHECK:       %[[q8:.*]] = "tensor.insert_slice"(%[[q6]], %[[q2]]) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>, static_offsets = array<i64: 0>, static_sizes = array<i64: 1>, static_strides = array<i64: 1>}> : (tensor<1xi1>, tensor<1xi1>) -> tensor<1xi1>
 // CHECK:       %[[q9:.*]] = "arith.constant"() <{value = dense<false> : tensor<1xi1>}> : () -> tensor<1xi1>
 // CHECK:       %[[q10:.*]] = "arith.cmpi"(%[[q8]], %[[q9]]) <{predicate = 0 : i64}> : (tensor<1xi1>, tensor<1xi1>) -> tensor<1xi1>
-// CHECK:       %[[q11:.*]] = "vector.reduction"(%[[q10]]) <{fastmath = #arith.fastmath<none>, kind = #vector.kind<and>}> : (tensor<1xi1>) -> i1
+// CHECK:       %[[q100:.+]] = "arith.constant"() <{value = 0 : index}> : () -> index
+// CHECK:       %[[q11:.+]] = "tensor.extract"(%[[q10]], %[[q100]]) : (tensor<1xi1>, index) -> i1 
 // CHECK:       %[[q12:.*]] = "rvsdg.match"(%[[q11]]) <{mapping = [#rvsdg.matchRule<1 -> 0>, #rvsdg.matchRule<0 -> 1>]}> : (i1) -> !rvsdg.ctrl<2>
 // CHECK:       %[[q13:.*]] = "rvsdg.gamma"(%[[q12]], %[[q5]]#1) ({
 // CHECK:       ^bb0(%[[arg3:.+]]: !quantum.qubit<1>):
@@ -25,11 +25,11 @@
 // CHECK:       }) : (!rvsdg.ctrl<2>, !quantum.qubit<1>) -> !quantum.qubit<1>
 // CHECK:       %[[q14:.*]]:2 = "quantum.measure"(%[[q4]]#1) : (!quantum.qubit<1>) -> (!quantum.measurement<1>, !quantum.qubit<1>)
 // CHECK:       %[[q15:.*]] = "quantum.to_tensor"(%[[q14]]#0) : (!quantum.measurement<1>) -> tensor<1xi1>
-// CHECK:       %[[q16:.*]] = "arith.constant"() <{value = 0 : index}> : () -> index
-// CHECK:       %[[q17:.*]] = "tensor.insert_slice"(%[[q15]], %[[q3]], %[[q16]]) <{operandSegmentSizes = array<i32: 1, 1, 1, 0, 0>, static_offsets = array<i64: -1>, static_sizes = array<i64: 1>, static_strides = array<i64: 1>}> : (tensor<1xi1>, tensor<1xi1>, index) -> tensor<1xi1>
+// CHECK:       %[[q17:.*]] = "tensor.insert_slice"(%[[q15]], %[[q3]]) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>, static_offsets = array<i64: 0>, static_sizes = array<i64: 1>, static_strides = array<i64: 1>}> : (tensor<1xi1>, tensor<1xi1>) -> tensor<1xi1>
 // CHECK:       %[[q18:.*]] = "arith.constant"() <{value = dense<false> : tensor<1xi1>}> : () -> tensor<1xi1>
 // CHECK:       %[[q19:.*]] = "arith.cmpi"(%[[q17]], %[[q18]]) <{predicate = 0 : i64}> : (tensor<1xi1>, tensor<1xi1>) -> tensor<1xi1>
-// CHECK:       %[[q20:.*]] = "vector.reduction"(%[[q19]]) <{fastmath = #arith.fastmath<none>, kind = #vector.kind<and>}> : (tensor<1xi1>) -> i1
+// CHECK:       %[[q200:.+]] = "arith.constant"() <{value = 0 : index}> : () -> index
+// CHECK:       %[[q20:.+]] = "tensor.extract"(%[[q19]], %[[q200]]) : (tensor<1xi1>, index) -> i1 
 // CHECK:       %[[q21:.*]] = "rvsdg.match"(%[[q20]]) <{mapping = [#rvsdg.matchRule<1 -> 0>, #rvsdg.matchRule<0 -> 1>]}> : (i1) -> !rvsdg.ctrl<2>
 // CHECK:       %[[q22:.*]] = "rvsdg.gamma"(%[[q21]], %[[q14]]#1) ({
 // CHECK:       ^bb0(%[[arg1:.+]]: !quantum.qubit<1>):
