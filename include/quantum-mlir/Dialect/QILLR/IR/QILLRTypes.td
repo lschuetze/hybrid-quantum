@@ -13,11 +13,15 @@ include "mlir/IR/BuiltinTypeInterfaces.td"
 def QILLR_QubitType : QILLR_Type<"Qubit"> {
   let mnemonic = "qubit";
   let summary = "qubit type";
+  let parameters = (ins "int64_t":$size);
+  let assemblyFormat = "`<` $size `>`";
 }
 
 def QILLR_ResultType : QILLR_Type<"Result"> {
-    let mnemonic = "result";
-    let summary = "A quantum measurement result.";
+  let mnemonic = "result";
+  let summary = "A quantum measurement result.";
+  let parameters = (ins "int64_t":$size);
+  let assemblyFormat = "`<` $size `>`";
 }
 
 def QILLR_MeasurementType : 1DTensorOf<[I1]>;

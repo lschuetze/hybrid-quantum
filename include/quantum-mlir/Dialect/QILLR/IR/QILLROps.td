@@ -38,7 +38,7 @@ def QILLR_SeedOp : QILLR_Op<"seed">{
 // QILLR memory operations.
 //===----------------------------------------------------------------------===//
 def QILLR_AllocOp : Memory_Op<"alloc", [MemoryEffects<[MemAlloc<DefaultResource>]>]> {
-  let summary = "Allocates a qubit.";
+  let summary = "Allocates a qubit register.";
   let description = [{  }];
 
   let results = (outs QILLR_QubitType:$result);
@@ -63,7 +63,8 @@ class PrimitiveGate_Op<string mnemonic, list<Trait> traits = [MemoryEffects<[Mem
     : Gate_Op<mnemonic, traits>{
   // Declare a mnemonic field so that derived definitions can override it.
   let arguments = (ins
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$input
+    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$input,
+    OptionalAttr<I64Attr>:$index
   );
 }
         
@@ -129,26 +130,30 @@ def QILLR_IdOp : PrimitiveGate_Op<"Id"> {
 //===----------------------------------------------------------------------===//
 // Two qubit gate operations.
 //===----------------------------------------------------------------------===//
-def QILLR_CNOTOp : Gate_Op<"CNOT", [MemoryEffects<[MemRead, MemWrite]>]> {
+class ControlledGate_Op<string mnemonic, list<Trait> traits = [MemoryEffects<[MemRead, MemWrite]>]>
+    : Gate_Op<mnemonic, traits>{
+  // Declare a mnemonic field so that derived definitions can override it.
+  let arguments = (ins
+    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$control,
+    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$target,
+    OptionalAttr<I64Attr>:$controlIndex,
+    OptionalAttr<I64Attr>:$targetIndex
+  );
+}
+
+def QILLR_CNOTOp : ControlledGate_Op<"CNOT"> {
   let summary = "CNOT gate operation";
   let description = [{
     The controlled-NOT (CNOT) gate flips the target qubit if the control qubit is in the |1> state.
   }];
-  let arguments = (ins
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$control,
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$target
-  );
+
 }
 
-def QILLR_CZOp : Gate_Op<"Cz", [MemoryEffects<[MemRead, MemWrite]>]> {
+def QILLR_CZOp : ControlledGate_Op<"Cz"> {
   let summary = "CZ gate operation";
   let description = [{
     The controlled-Z (CZ) gate
   }];
-  let arguments = (ins
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$control,
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$target
-  );
 }
 
 def QILLR_SwapOp : Gate_Op<"swap", [MemoryEffects<[MemRead, MemWrite]>]> {
@@ -158,58 +163,51 @@ def QILLR_SwapOp : Gate_Op<"swap", [MemoryEffects<[MemRead, MemWrite]>]> {
   }];
   let arguments = (ins
     Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$lhs,
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$rhs
+    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$rhs,
+    OptionalAttr<I64Attr>:$lhsIndex,
+    OptionalAttr<I64Attr>:$rhsIndex
   );
 }
 
 //===----------------------------------------------------------------------===//
 // Parametric single qubit gate operations.
 //===----------------------------------------------------------------------===//
-def QILLR_RxOp : Gate_Op<"Rx", [MemoryEffects<[MemRead, MemWrite]>]> {
+class RotationGate_Op<string mnemonic, list<Trait> traits = [MemoryEffects<[MemRead, MemWrite]>]>
+    : Gate_Op<mnemonic, traits>{
+  // Declare a mnemonic field so that derived definitions can override it.
+  let arguments = (ins
+    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$input,
+    F64:$angle,
+    OptionalAttr<I64Attr>:$index
+  );
+}
+
+def QILLR_RxOp : RotationGate_Op<"Rx"> {
   let summary = "Rx gate operation";
   let description = [{
     The X gate negates a qubit value.
   }];
-
-  let arguments = (ins
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$input,
-    F64:$angle
-  );
 }
 
 // Rz: a single-qubit rotation with an angle parameter.
-def QILLR_RzOp : Gate_Op<"Rz", [MemoryEffects<[MemRead, MemWrite]>]> {
+def QILLR_RzOp : RotationGate_Op<"Rz"> {
   let summary = "Rz gate operation";
   let description = [{
     The Rz gate rotates a qubit around the Z-axis by a specified angle.
   }];
-  
-  let arguments = (ins
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$input,
-    F64:$angle
-  );
 }
 
 // Ry: a single-qubit rotation with an angle parameter.
-def QILLR_RyOp : Gate_Op<"Ry", [MemoryEffects<[MemRead, MemWrite]>]> {
+def QILLR_RyOp : RotationGate_Op<"Ry"> {
   let summary = "Ry gate operation";
   let description = [{
     The Ry gate rotates a qubit around the Y-axis by a specified angle.
   }];
-
-  let arguments = (ins
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$input,
-    F64:$angle
-  );
 }
 
-def QILLR_PhaseOp : Gate_Op<"P", [MemoryEffects<[MemRead, MemWrite]>]> {
+def QILLR_PhaseOp : RotationGate_Op<"P"> {
   let summary = "Phase gate operation";
   let description = [{ Phase gate with rotation around Z axis. }];
-  let arguments = (ins
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$input,
-    F64:$angle
-  );
 } 
 
 // U: a universal single-qubit gate with three angles.
@@ -222,7 +220,10 @@ def QILLR_U3Op : Gate_Op<"U3", [MemoryEffects<[MemRead, MemWrite]>]> {
     Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$input,
     F64:$theta,
     F64:$phi,
-    F64:$lambda
+    F64:$lambda,
+    OptionalAttr<I64Attr>:$thetaIndex,
+    OptionalAttr<I64Attr>:$phiIndex,
+    OptionalAttr<I64Attr>:$lambdaIndex
   );
 }
 
@@ -232,7 +233,8 @@ def QILLR_U2Op : Gate_Op<"U2", [MemoryEffects<[MemRead, MemWrite]>]> {
   let arguments = (ins
     Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$input,
     F64:$phi,
-    F64:$lambda
+    F64:$lambda,
+    OptionalAttr<I64Attr>:$index
   );
 }
 
@@ -241,43 +243,41 @@ def QILLR_U1Op : Gate_Op<"U1", [MemoryEffects<[MemRead, MemWrite]>]> {
   let description = [{ A single-parameter unitary gate for phase rotation. Equivalent to Rz(λ). }];
   let arguments = (ins
     Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$input,
-    F64:$lambda
+    F64:$lambda,
+    OptionalAttr<I64Attr>:$index
   );
 }
 
 //===----------------------------------------------------------------------===//
 // Controlled Parametric two qubit gate operations.
 //===----------------------------------------------------------------------===//
-def QILLR_CRzOp : Gate_Op<"CRz", [MemoryEffects<[MemRead, MemWrite]>]> {
+class ControlledRotationGate_Op<string mnemonic, list<Trait> traits = [MemoryEffects<[MemRead, MemWrite]>]>
+    : Gate_Op<mnemonic, traits>{
+  // Declare a mnemonic field so that derived definitions can override it.
+  let arguments = (ins
+    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$control,
+    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$target,
+    F64:$angle,
+    OptionalAttr<I64Attr>:$controlIndex,
+    OptionalAttr<I64Attr>:$targetIndex
+  );
+}
+
+def QILLR_CRzOp : ControlledRotationGate_Op<"CRz"> {
   let summary = "Controlled-Rz gate";
   let description = [{ Applies a Z rotation conditioned on the control qubit. }];
-  let arguments = (ins
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$control,
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$target,
-    F64:$angle
-  );
 }
 
-def QILLR_CRyOp : Gate_Op<"CRy", [MemoryEffects<[MemRead, MemWrite]>]> {
+def QILLR_CRyOp : ControlledRotationGate_Op<"CRy"> {
   let summary = "Controlled-Ry gate";
   let description = [{ Applies a Y rotation conditioned on the control qubit. }];
-  let arguments = (ins
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$control,
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$target,
-    F64:$angle
-  );
 }
 
-def QILLR_CU1Op : Gate_Op<"CU1", [MemoryEffects<[MemRead, MemWrite]>]> {
+def QILLR_CU1Op : ControlledRotationGate_Op<"CU1"> {
   let summary = "Controlled-U1 gate";
   let description = [{
     The controlled-U1 (CU1) gate
   }];
-  let arguments = (ins 
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$control,
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$target,
-    F64:$angle
-  );
 }
 
 //===----------------------------------------------------------------------===//
@@ -289,7 +289,10 @@ def QILLR_CCXOp : Gate_Op<"CCX", [MemoryEffects<[MemRead, MemWrite]>]> {
   let arguments = (ins 
     Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$control1, 
     Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$control2, 
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$target
+    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$target,
+    OptionalAttr<I64Attr>:$control1Index,
+    OptionalAttr<I64Attr>:$control2Index,
+    OptionalAttr<I64Attr>:$targetIndex
   );
 }
 
@@ -301,7 +304,10 @@ def QILLR_CSwapOp : Gate_Op<"cswap", [MemoryEffects<[MemRead, MemWrite]>]> {
   let arguments = (ins
     Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$control,
     Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$lhs,
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$rhs
+    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$rhs,
+    OptionalAttr<I64Attr>:$controlIndex,
+    OptionalAttr<I64Attr>:$lhsIndex,
+    OptionalAttr<I64Attr>:$rhsIndex
   );
 }
 
@@ -309,7 +315,8 @@ def QILLR_BarrierOp : Gate_Op<"barrier", [MemoryEffects<[MemRead, MemWrite]>]> {
   let summary = "Barrier operation";
   let description = [{ A barrier operation that prevents optimization across it. }];
   let arguments = (ins
-    Variadic<QILLR_QubitType>:$input
+    Variadic<QILLR_QubitType>:$input,
+    OptionalAttr<I64ArrayAttr>:$indices
   );
 }
 
@@ -444,7 +451,9 @@ def QILLR_MeasureOp : QILLR_Op<"measure", [MemoryEffects<[MemRead, MemWrite]>]> 
 
     let arguments = (ins
       QILLR_QubitType:$input,
-      QILLR_ResultType:$result
+      QILLR_ResultType:$result,
+      OptionalAttr<I64Attr>:$inputIndex,
+      OptionalAttr<I64Attr>:$resultIndex
     );
 }
 
@@ -453,10 +462,11 @@ def QILLR_ReadMeasurementOp : QILLR_Op<"read_measurement", [MemoryEffects<[MemRe
   let description = [{ }];
   
   let arguments = (ins
-    QILLR_ResultType:$input
+    QILLR_ResultType:$input,
+    OptionalAttr<I64Attr>:$inputIndex
   );
   let results = (outs
-    I1:$measurement
+    QILLR_MeasurementType:$measurement
   );
 }
 
@@ -465,7 +475,8 @@ def QILLR_ResetOp : QILLR_Op<"reset", [MemoryEffects<[MemRead, MemWrite]>]> {
   let description = [{ }];
   
   let arguments = (ins
-    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$input
+    Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$input,
+    OptionalAttr<I64Attr>:$inputIndex
   );
 }
 
@@ -474,7 +485,8 @@ def QILLR_DeallocateOp : QILLR_Op<"deallocate", [MemoryEffects<[MemFree]>]> {
   let description = [{ }];
   
   let arguments = (ins
-    Arg<QILLR_QubitType, "", [MemFree]>:$input
+    Arg<QILLR_QubitType, "", [MemFree]>:$input,
+    OptionalAttr<I64Attr>:$inputIndex
   );
 }
 
