@@ -1,13 +1,8 @@
-if(MLIR_ENABLE_BINDINGS_PYTHON)
-  include(MLIRDetectPythonEnv)
-  mlir_configure_python_dev_packages()
-endif()
-
 include(AddMLIRPython)
 
-# Specifies that all MLIR packages are co-located under the `mlir_standalone`
+# Specifies that all MLIR packages are co-located under the `mlir_quantum`
 # top level package (the API has been embedded in a relocatable way).
-add_compile_definitions("MLIR_PYTHON_PACKAGE_PREFIX=mlir.")
+add_compile_definitions("MLIR_PYTHON_PACKAGE_PREFIX=${MLIR_PYTHON_PACKAGE_PREFIX}.")
 
 ################################################################################
 # Sources
@@ -17,7 +12,7 @@ declare_mlir_python_sources(QILLRPythonSources)
 
 declare_mlir_dialect_python_bindings(
   ADD_TO_PARENT QILLRPythonSources
-  ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mlir"
+  ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mlir_quantum"
   TD_FILE dialects/QILLROps.td
   SOURCES
     dialects/qillr.py
@@ -28,7 +23,7 @@ declare_mlir_python_sources(RVSDGPythonSources)
 
 declare_mlir_dialect_python_bindings(
   ADD_TO_PARENT RVSDGPythonSources
-  ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mlir"
+  ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mlir_quantum"
   TD_FILE dialects/RVSDGOps.td
   SOURCES
     dialects/rvsdg.py
@@ -39,7 +34,7 @@ declare_mlir_python_sources(QuantumPythonSources)
 
 declare_mlir_dialect_python_bindings(
   ADD_TO_PARENT QuantumPythonSources
-  ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mlir"
+  ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mlir_quantum"
   TD_FILE dialects/QuantumOps.td
   SOURCES
     dialects/quantum.py
@@ -50,7 +45,7 @@ declare_mlir_python_sources(QPUPythonSources)
 
 declare_mlir_dialect_python_bindings(
   ADD_TO_PARENT QPUPythonSources
-  ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mlir"
+  ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mlir_quantum"
   TD_FILE dialects/QPUOps.td
   SOURCES
     dialects/qpu.py
@@ -129,8 +124,8 @@ declare_mlir_python_extension(QPUPythonSources.NanobindExtension
 
 add_mlir_python_common_capi_library(QILLRPythonCAPI
   INSTALL_COMPONENT QILLRPythonModules
-  INSTALL_DESTINATION python_packages/quantum-mlir/mlir/_mlir_libs
-  OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python_packages/quantum-mlir/mlir/_mlir_libs"
+  INSTALL_DESTINATION "${MLIR_BINDINGS_PYTHON_INSTALL_PREFIX}/_mlir_libs"
+  OUTPUT_DIRECTORY "${MLIR_BINARY_DIR}/${MLIR_BINDINGS_PYTHON_INSTALL_PREFIX}/_mlir_libs"
   RELATIVE_INSTALL_ROOT "../../../.."
   DECLARED_SOURCES
     QILLRPythonSources
@@ -140,8 +135,8 @@ add_mlir_python_common_capi_library(QILLRPythonCAPI
 
 add_mlir_python_common_capi_library(RVSDGPythonCAPI
   INSTALL_COMPONENT RVSDGPythonModules
-  INSTALL_DESTINATION python_packages/quantum-mlir/mlir/_mlir_libs
-  OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python_packages/quantum-mlir/mlir/_mlir_libs"
+  INSTALL_DESTINATION "${MLIR_BINDINGS_PYTHON_INSTALL_PREFIX}/_mlir_libs"
+  OUTPUT_DIRECTORY "${MLIR_BINARY_DIR}/${MLIR_BINDINGS_PYTHON_INSTALL_PREFIX}/_mlir_libs"
   RELATIVE_INSTALL_ROOT "../../../.."
   DECLARED_SOURCES
     RVSDGPythonSources
@@ -151,8 +146,8 @@ add_mlir_python_common_capi_library(RVSDGPythonCAPI
 
 add_mlir_python_common_capi_library(QuantumPythonCAPI
   INSTALL_COMPONENT QuantumPythonModules
-  INSTALL_DESTINATION python_packages/quantum-mlir/mlir/_mlir_libs
-  OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python_packages/quantum-mlir/mlir/_mlir_libs"
+  INSTALL_DESTINATION "${MLIR_BINDINGS_PYTHON_INSTALL_PREFIX}/_mlir_libs"
+  OUTPUT_DIRECTORY "${MLIR_BINARY_DIR}/${MLIR_BINDINGS_PYTHON_INSTALL_PREFIX}/_mlir_libs"
   RELATIVE_INSTALL_ROOT "../../../.."
   DECLARED_SOURCES
     QuantumPythonSources
@@ -162,8 +157,8 @@ add_mlir_python_common_capi_library(QuantumPythonCAPI
 
 add_mlir_python_common_capi_library(QPUPythonCAPI
   INSTALL_COMPONENT QPUPythonModules
-  INSTALL_DESTINATION python_packages/quantum-mlir/mlir/_mlir_libs
-  OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python_packages/quantum-mlir/mlir/_mlir_libs"
+  INSTALL_DESTINATION "${MLIR_BINDINGS_PYTHON_INSTALL_PREFIX}/_mlir_libs"
+  OUTPUT_DIRECTORY "${MLIR_BINARY_DIR}/${MLIR_BINDINGS_PYTHON_INSTALL_PREFIX}/_mlir_libs"
   RELATIVE_INSTALL_ROOT "../../../.."
   DECLARED_SOURCES
     QPUPythonSources
@@ -175,9 +170,11 @@ add_mlir_python_common_capi_library(QPUPythonCAPI
 # Instantiation of all Python modules
 ################################################################################
 
+set(StandalonePythonModules_ROOT_PREFIX "${MLIR_BINARY_DIR}/${MLIR_BINDINGS_PYTHON_INSTALL_PREFIX}")
+
 add_mlir_python_modules(QILLRPythonModules
-  ROOT_PREFIX "${CMAKE_BINARY_DIR}/python_packages/quantum-mlir/mlir"
-  INSTALL_PREFIX "python_packages/quantum-mlir/mlir"
+  ROOT_PREFIX "${StandalonePythonModules_ROOT_PREFIX}"
+  INSTALL_PREFIX "${MLIR_BINDINGS_PYTHON_INSTALL_PREFIX}"
   DECLARED_SOURCES
     QILLRPythonSources
     MLIRPythonExtension.RegisterEverything
@@ -187,8 +184,8 @@ add_mlir_python_modules(QILLRPythonModules
 )
 
 add_mlir_python_modules(RVSDGPythonModules
-  ROOT_PREFIX "${CMAKE_BINARY_DIR}/python_packages/quantum-mlir/mlir"
-  INSTALL_PREFIX "python_packages/quantum-mlir/mlir"
+  ROOT_PREFIX "${StandalonePythonModules_ROOT_PREFIX}"
+  INSTALL_PREFIX "${MLIR_BINDINGS_PYTHON_INSTALL_PREFIX}"
   DECLARED_SOURCES
     RVSDGPythonSources
   COMMON_CAPI_LINK_LIBS
@@ -196,8 +193,8 @@ add_mlir_python_modules(RVSDGPythonModules
 )
 
 add_mlir_python_modules(QuantumPythonModules
-  ROOT_PREFIX "${CMAKE_BINARY_DIR}/python_packages/quantum-mlir/mlir"
-  INSTALL_PREFIX "python_packages/quantum-mlir/mlir"
+  ROOT_PREFIX "${StandalonePythonModules_ROOT_PREFIX}"
+  INSTALL_PREFIX "${MLIR_BINDINGS_PYTHON_INSTALL_PREFIX}"
   DECLARED_SOURCES
     QuantumPythonSources
   COMMON_CAPI_LINK_LIBS
@@ -205,8 +202,8 @@ add_mlir_python_modules(QuantumPythonModules
 )
 
 add_mlir_python_modules(QPUPythonModules
-  ROOT_PREFIX "${CMAKE_BINARY_DIR}/python_packages/quantum-mlir/mlir"
-  INSTALL_PREFIX "python_packages/quantum-mlir/mlir"
+  ROOT_PREFIX "${StandalonePythonModules_ROOT_PREFIX}"
+  INSTALL_PREFIX "${MLIR_BINDINGS_PYTHON_INSTALL_PREFIX}"
   DECLARED_SOURCES
     QPUPythonSources
   COMMON_CAPI_LINK_LIBS

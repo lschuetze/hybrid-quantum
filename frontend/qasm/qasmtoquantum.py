@@ -1,5 +1,5 @@
 """
-#   Frontend generating Quantum dialect code from QASM2 and QASM3 code.
+# Frontend generating Quantum dialect code from QASM2 and QASM3 code.
 #
 # @author  Lars Schütze (lars.schuetze@tu-dresden.de)
 """
@@ -11,14 +11,14 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from enum import Enum
 
-from mlir._mlir_libs._mlirDialectsQPU import qpu as qpu_dialect
-from mlir._mlir_libs._mlirDialectsQuantum import QuantumMeasurementType, QuantumQubitType
-from mlir._mlir_libs._mlirDialectsQuantum import quantum as quantum_dialect
-from mlir._mlir_libs._mlirDialectsRVSDG import ControlType, MatchRuleAttr
-from mlir._mlir_libs._mlirDialectsRVSDG import rvsdg as rvsdg_dialect
-from mlir.dialects import arith, func, qpu, quantum, rvsdg, scf, tensor
-from mlir.dialects.arith import CmpIPredicate
-from mlir.dialects.builtin import (
+from mlir_quantum._mlir_libs._mlirDialectsQPU import qpu as qpu_dialect
+from mlir_quantum._mlir_libs._mlirDialectsQuantum import QuantumMeasurementType, QuantumQubitType
+from mlir_quantum._mlir_libs._mlirDialectsQuantum import quantum as quantum_dialect
+from mlir_quantum._mlir_libs._mlirDialectsRVSDG import ControlType, MatchRuleAttr
+from mlir_quantum._mlir_libs._mlirDialectsRVSDG import rvsdg as rvsdg_dialect
+from mlir_quantum.dialects import arith, func, qpu, quantum, rvsdg, scf, tensor
+from mlir_quantum.dialects.arith import CmpIPredicate
+from mlir_quantum.dialects.builtin import (
     Block,
     BlockArgumentList,
     DenseElementsAttr,
@@ -28,7 +28,7 @@ from mlir.dialects.builtin import (
     IntegerType,
     RankedTensorType,
 )
-from mlir.ir import (
+from mlir_quantum.ir import (
     ArrayAttr,
     Context,
     F64Type,
