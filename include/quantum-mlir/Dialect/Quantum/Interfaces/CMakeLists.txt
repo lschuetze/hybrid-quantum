@@ -1,0 +1,1 @@
+mlir_gen_iface(Quantum InferRegisterRangesInterface op)

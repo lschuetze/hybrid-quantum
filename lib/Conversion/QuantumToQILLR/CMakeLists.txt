@@ -15,4 +15,6 @@ add_mlir_conversion_library(QuantumToQILLR
         QILLRIR
         RVSDGIR
         MLIRIR
+        QuantumAnalysis
+        QuantumInterfaces
 )

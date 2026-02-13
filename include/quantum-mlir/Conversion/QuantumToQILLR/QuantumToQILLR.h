@@ -2,6 +2,7 @@
 
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "quantum-mlir/Dialect/Quantum/Analysis/RegisterRangesAnalysis.h"
 
 namespace mlir {
 
@@ -15,6 +16,7 @@ namespace mlir {
 namespace quantum {
 
 void populateConvertQuantumToQILLRPatterns(
+    mlir::DataFlowSolver &solver,
     TypeConverter &typeConverter,
     RewritePatternSet &patterns);
 

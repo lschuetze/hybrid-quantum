@@ -8,6 +8,7 @@
 #define QUANTUM_OPS
 
 include "quantum-mlir/Dialect/Quantum/IR/QuantumTypes.td"
+include "quantum-mlir/Dialect/Quantum/Interfaces/InferRegisterRangesInterface.td"
 include "mlir/Interfaces/CastInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/IR/SymbolInterfaces.td"
@@ -15,6 +16,7 @@ include "mlir/Interfaces/CallInterfaces.td"
 include "mlir/Interfaces/FunctionInterfaces.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
+
 
 //===----------------------------------------------------------------------===//
 // Quantum OP templates
@@ -204,7 +206,8 @@ def Quantum_AllocOp : Memory_Op<
           MemoryEffects<[
             MemRead
           ]>,
-          NoClone]> {
+          NoClone,
+          DeclareOpInterfaceMethods<InferRegisterRangesInterface, ["inferResultRanges"]>]> {
   let summary = "Allocate n qubits into a quantum register.";
   let description = [{
     Allocates a fixed number of N qubits into a single quantum register.
@@ -294,7 +297,7 @@ def Quantum_SplitOp : Memory_Op<
     let results = (outs
       Variadic<Quantum_QubitType>:$result
     );
-    let hasVerifier = 0;
+    let hasVerifier = 1;
 }
 
 def Quantum_MergeOp : Memory_Op<
@@ -322,7 +325,7 @@ def Quantum_MergeOp : Memory_Op<
 
     let results = (outs Quantum_QubitType:$result);
 
-    let hasVerifier = 0;
+    let hasVerifier = 1;
 }
 
 //===----------------------------------------------------------------------===//

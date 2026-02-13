@@ -49,17 +49,17 @@ struct DecomposeU3Pattern : public OpConversionPattern<qillr::U3Op> {
             loc,
             qubit,
             adaptor.getPhi(),
-            adaptor.getPhiIndexAttr());
+            adaptor.getPhiIndex());
         rewriter.create<qillr::RyOp>(
             loc,
             qubit,
             adaptor.getTheta(),
-            adaptor.getThetaIndexAttr());
+            adaptor.getThetaIndex());
         rewriter.create<qillr::RzOp>(
             loc,
             qubit,
             adaptor.getLambda(),
-            adaptor.getLambdaIndexAttr());
+            adaptor.getLambdaIndex());
 
         rewriter.eraseOp(op);
 

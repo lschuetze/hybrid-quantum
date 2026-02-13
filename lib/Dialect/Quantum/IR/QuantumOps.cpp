@@ -9,10 +9,12 @@
 #include "mlir/Transforms/InliningUtils.h"
 #include "quantum-mlir/Dialect/Quantum/IR/QuantumAttributes.h"
 #include "quantum-mlir/Dialect/Quantum/IR/QuantumTypes.h"
+#include "quantum-mlir/Dialect/Quantum/Interfaces/InferRegisterRangesInterface.h"
 
 #include <algorithm>
 #include <cstddef>
 #include <iterator>
+#include <llvm/ADT/APInt.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
@@ -28,6 +30,7 @@
 #include <mlir/IR/PatternMatch.h>
 #include <mlir/IR/Region.h>
 #include <mlir/IR/Value.h>
+#include <mlir/Interfaces/InferIntRangeInterface.h>
 #include <mlir/Support/LLVM.h>
 #include <mlir/Support/LogicalResult.h>
 #include <optional>
@@ -58,10 +61,7 @@ struct QuantumInlinerInterface : public DialectInlinerInterface {
     //===--------------------------------------------------------------------===//
 
     /// Call operations can always be inlined
-    bool isLegalToInline(
-        Operation* call,
-        Operation* callable,
-        bool wouldBeCloned) const final
+    bool isLegalToInline(Operation*, Operation*, bool) const final
     {
         return true;
     }
@@ -82,9 +82,9 @@ struct QuantumInlinerInterface : public DialectInlinerInterface {
     // Transformation Hooks
     //===--------------------------------------------------------------------===//
 
-    /// Handle the given inlined terminator by replacing it with a new operation
-    /// as necessary.
-    void handleTerminator(Operation* op, Block* newDest) const final
+    /// Handle the given inlined terminator by replacing it with a new
+    /// operation as necessary.
+    void handleTerminator(Operation* op, Block*) const final
     {
         auto returnOp = llvm::dyn_cast<quantum::ReturnOp>(op);
         if (!returnOp) return;
@@ -106,6 +106,21 @@ struct QuantumInlinerInterface : public DialectInlinerInterface {
     };
 };
 } // namespace
+
+//===--------------------------------------------------------------------===//
+// InterRegisterRangesInterface Hooks
+//===--------------------------------------------------------------------===//
+
+void AllocOp::inferResultRanges(
+    ArrayRef<RegisterRanges>,
+    SetRangeFn setResultRanges)
+{
+    auto size = llvm::APInt(64, getResult().getType().getSize());
+    ConstantIntRanges range(size, size, size, size);
+    setResultRanges(
+        getResult(),
+        RegisterRanges(ConstantRegisterRanges(getResult(), range)));
+}
 
 //===----------------------------------------------------------------------===//
 // Canonicalization
@@ -188,6 +203,34 @@ LogicalResult RyOp::canonicalize(RyOp op, PatternRewriter &rewriter)
 //===----------------------------------------------------------------------===//
 // Verifier
 //===----------------------------------------------------------------------===//
+
+LogicalResult MergeOp::verify()
+{
+    int64_t size = 0;
+    for (auto operand : getOperands()) {
+        auto in = llvm::cast<QubitType>(operand.getType());
+        size += in.getSize();
+    }
+    if (getResult().getType().getSize() != size)
+        return emitOpError(
+            "result size must be equal to sum of operand sizes.");
+
+    return success();
+}
+
+LogicalResult SplitOp::verify()
+{
+    int64_t size = 0;
+    for (auto result : getResults()) {
+        auto out = llvm::cast<QubitType>(result.getType());
+        size += out.getSize();
+    }
+    if (getInput().getType().getSize() != size)
+        return emitOpError(
+            "operand size must be equal to sum of result sizes.");
+
+    return success();
+}
 
 // NOTE: We assume N qubit device that may or may not have passive qubits. The
 // required qubits is thus the max qubit index regardless of topology.
