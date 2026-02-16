@@ -223,12 +223,15 @@ def Quantum_AllocOp : Memory_Op<
 }
 
 def Quantum_DeallocateOp : Memory_Op<
-        "deallocate",
-        [
-          MemoryEffects<[
-            MemRead,
-            MemWrite
-          ]>]> {
+  "deallocate",
+  [
+    MemoryEffects<[
+      MemRead,
+      MemWrite
+    ]>,
+    DeclareOpInterfaceMethods<
+      InferRegisterRangesInterface, ["inferResultRanges"]>
+  ]> {
     let summary = "Deallocate a quantum register.";
     let description = [{
     Use this operation on all qubit registers that are not measured.
@@ -342,7 +345,9 @@ class PrimitiveGate_Op<string mnemonic, list<Trait> traits = []> :
 def Quantum_IdOp : PrimitiveGate_Op<
         "id",
         [
-          AllTypesMatch<["input", "result"]>]> {
+          AllTypesMatch<["input", "result"]
+          
+        >]> {
   let summary = "Identity gate operation";
   let description = [{
     Example:
@@ -354,11 +359,13 @@ def Quantum_IdOp : PrimitiveGate_Op<
 }
 
 def Quantum_HOp : PrimitiveGate_Op<
-        "H",
-        [
-          Hermitian,
-          NoMemoryEffect,
-          AllTypesMatch<["input", "result"]>]> {
+  "H",
+  [
+    Hermitian,
+    NoMemoryEffect,
+    AllTypesMatch<["input", "result"]>,
+    InferRegisterRangesInterface
+  ]> {
   let summary = "Hadamard gate operation";
   let description = [{
     Example:
@@ -369,7 +376,14 @@ def Quantum_HOp : PrimitiveGate_Op<
   let results = (outs Quantum_QubitType:$result);
 }
 
-def Quantum_XOp : PrimitiveGate_Op<"X", [Hermitian, NoMemoryEffect,AllTypesMatch<["input", "result"]>]> {
+def Quantum_XOp : PrimitiveGate_Op<
+  "X",
+  [
+    Hermitian,
+    NoMemoryEffect,
+    AllTypesMatch<["input", "result"]>,
+    InferRegisterRangesInterface
+  ]>{
   let summary = "X gate operation (NOT gate)";
   let description = [{%out = "quantum.X"(%qubit) : !quantum.qubit<1> -> !quantum.qubit<1>}]; 
   let arguments = (ins Quantum_QubitType:$input);

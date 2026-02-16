@@ -7,6 +7,8 @@
 
 #include "quantum-mlir/Dialect/Quantum/Interfaces/InferRegisterRangesInterface.h"
 
+#include "llvm/Support/Debug.h"
+
 #include <llvm/Support/Casting.h>
 
 #define DEBUG_TYPE "register-range-analysis"
@@ -26,6 +28,7 @@ LogicalResult RegisterRangesAnalysis::visitOperation(
         return success();
     }
 
+    LLVM_DEBUG(llvm::dbgs() << "Inferring ranges for " << *op << "\n");
     auto argRanges =
         llvm::map_to_vector(operands, [](const RegisterRangesLattice* lattice) {
             return lattice->getValue();
@@ -36,6 +39,7 @@ LogicalResult RegisterRangesAnalysis::visitOperation(
         if (!result) return;
         assert(llvm::is_contained(op->getResults(), result));
 
+        LLVM_DEBUG(llvm::dbgs() << "Inferred range " << attrs << "\n");
         RegisterRangesLattice* lattice = results[result.getResultNumber()];
         RegisterRanges oldRange = lattice->getValue();
 
@@ -50,6 +54,7 @@ LogicalResult RegisterRangesAnalysis::visitOperation(
         });
         if (isYieldedResult && !oldRange.isUninitialized()
             && !(lattice->getValue() == oldRange)) {
+            LLVM_DEBUG(llvm::dbgs() << "Loop variant loop result detected\n");
             changed |= lattice->join(RegisterRanges());
         }
         propagateIfChanged(lattice, changed);

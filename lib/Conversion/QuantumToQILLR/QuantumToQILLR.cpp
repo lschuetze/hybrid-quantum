@@ -92,14 +92,15 @@ LogicalResult IndexTrackingOpConversionPattern<OpT>::lookupSingle(
     std::optional<uint64_t> &result,
     ConversionPatternRewriter &rewriter) const
 {
-    const auto* lattice =
+    const RegisterRangesLattice* lattice =
         this->solver.lookupState<RegisterRangesLattice>(value);
     if (!lattice)
         return rewriter.notifyMatchFailure(
             value.getDefiningOp(),
             "Lattice value not found");
 
-    const auto indices = lattice->getValue().getValue();
+    const auto latticeValue = lattice->getValue();
+    const auto indices = latticeValue.getValue();
     if (indices.size() > 1)
         return rewriter.notifyMatchFailure(
             value.getDefiningOp(),

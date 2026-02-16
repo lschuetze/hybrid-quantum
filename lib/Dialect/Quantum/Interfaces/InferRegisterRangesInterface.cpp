@@ -5,6 +5,7 @@
 
 #include "quantum-mlir/Dialect/Quantum/Interfaces/InferRegisterRangesInterface.h"
 
+#include "quantum-mlir/Dialect/Quantum/IR/QuantumTypes.h"
 #include "quantum-mlir/Dialect/Quantum/Interfaces/InferRegisterRangesInterface.cpp.inc"
 
 #include <llvm/ADT/SmallVector.h>
@@ -19,11 +20,9 @@ void mlir::quantum::registerrange::detail::defaultInferResultRanges(
 {
     // Standard implementation passes for each input operand its analysis result
     // to the corresponding result value
-    for (auto &&[result, range] :
-         llvm::zip(interface->getResults(), argRanges)) {
-        if (range.isUninitialized()) return;
-        setResultRanges(result, range);
-    }
+    for (auto &&[result, range] : llvm::zip(interface->getResults(), argRanges))
+        if (llvm::isa<QubitType>(result.getType()))
+            setResultRanges(result, range);
 }
 
 bool ConstantRegisterRanges::operator==(
@@ -44,4 +43,11 @@ raw_ostream &
 mlir::quantum::operator<<(raw_ostream &os, const ConstantRegisterRanges &range)
 {
     return os << range.getRegisterValue() << " -> " << range.getRanges();
+}
+
+raw_ostream &
+mlir::quantum::operator<<(raw_ostream &os, const RegisterRanges &range)
+{
+    range.print(os);
+    return os;
 }

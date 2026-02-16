@@ -15,6 +15,7 @@
 
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallVector.h>
 #include <mlir/IR/ValueRange.h>
 #include <mlir/Interfaces/InferIntRangeInterface.h>
@@ -46,7 +47,7 @@ raw_ostream &operator<<(raw_ostream &, const ConstantRegisterRanges &);
 
 class RegisterRanges {
 public:
-    RegisterRanges() {}
+    RegisterRanges() = default;
 
     RegisterRanges(ConstantRegisterRanges range) { ranges.push_back(range); }
 
@@ -62,25 +63,27 @@ public:
     bool operator==(const RegisterRanges &rhs) const
     {
         if (ranges.size() != rhs.ranges.size()) return false;
-        bool cmp = true;
         for (unsigned int i = 0; i < ranges.size(); ++i)
-            cmp &= ranges[i] == rhs.ranges[i];
-        return cmp;
+            if (ranges[i] != rhs.ranges[i]) return false;
+        // Everything matches
+        return true;
     }
 
     /// Compute the least upper bound of two ranges.
+    /// Must be monolitic
     static RegisterRanges
     join(const RegisterRanges &lhs, const RegisterRanges &rhs)
     {
         if (lhs.isUninitialized()) return rhs;
         if (rhs.isUninitialized()) return lhs;
 
-        llvm::SmallVector<ConstantRegisterRanges> result;
-        for (unsigned int i = 0; i < lhs.ranges.size(); ++i) {
-            for (unsigned int j = 0; j < rhs.ranges.size(); ++j)
-                if (lhs.ranges == rhs.ranges) return lhs;
-        }
-        return RegisterRanges();
+        if (lhs == rhs) return lhs;
+
+        llvm::SmallVector<ConstantRegisterRanges> result(lhs.ranges);
+        for (unsigned int i = 0; i < rhs.ranges.size(); ++i)
+            if (!lhs.contains(rhs.ranges[i]))
+                result.emplace_back(rhs.ranges[i]);
+        return RegisterRanges(result);
     }
 
     const llvm::ArrayRef<ConstantRegisterRanges> getValue() const
@@ -92,12 +95,21 @@ public:
     /// Print the integer value range.
     void print(raw_ostream &os) const
     {
-        for (const auto &elem : ranges) os << elem;
+        for (const auto &elem : ranges) os << elem << ", ";
+    }
+
+    bool contains(ConstantRegisterRanges entry) const
+    {
+        for (auto ranges : ranges)
+            if (ranges == entry) return true;
+        return false;
     }
 
 private:
     llvm::SmallVector<ConstantRegisterRanges> ranges;
 };
+
+raw_ostream &operator<<(raw_ostream &, const RegisterRanges &);
 
 /// The type of the `setResultRanges` callback provided to ops implementing
 /// InferRegisterRangesAnalysis. It should be called once for each quantum

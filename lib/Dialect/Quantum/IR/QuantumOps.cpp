@@ -115,11 +115,19 @@ void AllocOp::inferResultRanges(
     ArrayRef<RegisterRanges>,
     SetRangeFn setResultRanges)
 {
-    auto size = llvm::APInt(64, getResult().getType().getSize());
-    ConstantIntRanges range(size, size, size, size);
+    auto zero = llvm::APInt(64, 0);
+    auto size = llvm::APInt(64, getResult().getType().getSize() - 1);
+    ConstantIntRanges range(zero, size, zero, size);
     setResultRanges(
         getResult(),
         RegisterRanges(ConstantRegisterRanges(getResult(), range)));
+}
+
+void DeallocateOp::inferResultRanges(
+    ArrayRef<RegisterRanges>,
+    SetRangeFn setResultRanges)
+{
+    return;
 }
 
 //===----------------------------------------------------------------------===//
