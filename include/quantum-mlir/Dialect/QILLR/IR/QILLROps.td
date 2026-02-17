@@ -41,6 +41,7 @@ def QILLR_AllocOp : Memory_Op<"alloc", [MemoryEffects<[MemAlloc<DefaultResource>
   let summary = "Allocates a qubit register.";
   let description = [{  }];
 
+  let arguments = (ins I64Prop:$size);
   let results = (outs QILLR_QubitType:$result);
 }
 
@@ -48,6 +49,7 @@ def QILLR_AllocResultOp : Memory_Op<"ralloc", [MemoryEffects<[MemAlloc<DefaultRe
   let summary = "Allocate n results into a result register.";
   let description = [{ Allocates a fixed number of results into a result register. }];
 
+  let arguments = (ins I64Prop:$size);
   let results = (outs QILLR_ResultType:$result);
 }
 

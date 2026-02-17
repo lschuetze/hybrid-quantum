@@ -23,7 +23,7 @@ MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(QILLR, qillr);
 MLIR_CAPI_EXPORTED bool mlirTypeIsAQubitType(MlirType type);
 
 /// Creates an qillr.QubitType type.
-MLIR_CAPI_EXPORTED MlirType mlirQubitTypeGet(MlirContext ctx, int64_t size);
+MLIR_CAPI_EXPORTED MlirType mlirQubitTypeGet(MlirContext ctx);
 
 //===---------------------------------------------------------------------===//
 // ResultType
@@ -33,7 +33,7 @@ MLIR_CAPI_EXPORTED MlirType mlirQubitTypeGet(MlirContext ctx, int64_t size);
 MLIR_CAPI_EXPORTED bool mlirTypeIsAResultType(MlirType type);
 
 /// Creates an qillr.QubitType type.
-MLIR_CAPI_EXPORTED MlirType mlirResultTypeGet(MlirContext ctx, int64_t size);
+MLIR_CAPI_EXPORTED MlirType mlirResultTypeGet(MlirContext ctx);
 
 #ifdef __cplusplus
 }

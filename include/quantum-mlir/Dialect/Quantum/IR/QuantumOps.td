@@ -59,10 +59,12 @@ def Hermitian : NativeOpTrait<"Hermitian"> {
 // Quantum gate operations.
 //===----------------------------------------------------------------------===//
 
-def Quantum_GateOp : Quantum_Op<"gate", [
-  IsolatedFromAbove,
-  FunctionOpInterface
-]> {
+def Quantum_GateOp : Quantum_Op<
+  "gate",
+  [
+    IsolatedFromAbove,
+    FunctionOpInterface
+  ]> {
   let summary = "A quantum gate operation";
   let description = [{ A quantum gate operation. }];
   let arguments = (ins
@@ -107,9 +109,12 @@ def Quantum_GateOp : Quantum_Op<"gate", [
   }];
 }
 
-def Quantum_GateCallOp : Gate_Op<"call", [
-  CallOpInterface,
-  DeclareOpInterfaceMethods<SymbolUserOpInterface>]> {
+def Quantum_GateCallOp : Gate_Op<
+  "call",
+  [
+    CallOpInterface,
+    DeclareOpInterfaceMethods<SymbolUserOpInterface>
+  ]> {
   let summary = "Gate call operation";
   let description = [{ Gate call operation. }];
 
@@ -172,11 +177,14 @@ def Quantum_GateCallOp : Gate_Op<"call", [
   }];
 }
 
-def Quantum_ReturnOp : Quantum_Op<"return", [
-  Pure,
-  HasParent<"GateOp">,
-  ReturnLike,
-  Terminator]> {
+def Quantum_ReturnOp : Quantum_Op<
+  "return",
+  [
+    Pure,
+    HasParent<"GateOp">,
+    ReturnLike,
+    Terminator
+  ]> {
   let summary = "Quantum gate return operation";
   let description = [{
     The `quantum.return` operation represents a return operation within a
@@ -201,13 +209,16 @@ def Quantum_ReturnOp : Quantum_Op<"return", [
 //===----------------------------------------------------------------------===//
 
 def Quantum_AllocOp : Memory_Op<
-        "alloc",
-        [
-          MemoryEffects<[
-            MemRead
-          ]>,
-          NoClone,
-          DeclareOpInterfaceMethods<InferRegisterRangesInterface, ["inferResultRanges"]>]> {
+  "alloc",
+  [
+    MemoryEffects<[
+      MemRead
+    ]>,
+    NoClone,
+    DeclareOpInterfaceMethods<
+      InferRegisterRangesInterface, ["inferResultRanges"]
+    >
+  ]> {
   let summary = "Allocate n qubits into a quantum register.";
   let description = [{
     Allocates a fixed number of N qubits into a single quantum register.
@@ -230,7 +241,8 @@ def Quantum_DeallocateOp : Memory_Op<
       MemWrite
     ]>,
     DeclareOpInterfaceMethods<
-      InferRegisterRangesInterface, ["inferResultRanges"]>
+      InferRegisterRangesInterface, ["inferResultRanges"]
+    >
   ]> {
     let summary = "Deallocate a quantum register.";
     let description = [{
@@ -251,12 +263,14 @@ def Quantum_DeallocateOp : Memory_Op<
 }
 
 def Quantum_ResetOp : Memory_Op<
-        "reset",
-        [
-          MemoryEffects<[
-            MemRead,
-            MemWrite
-          ]>]> {
+  "reset",
+  [
+    MemoryEffects<[
+      MemRead,
+      MemWrite
+    ]>,
+    InferRegisterRangesInterface
+  ]> {
     let summary = "Reset a quantum register.";
     let description = [{
     Reset qubits.
@@ -279,13 +293,17 @@ def Quantum_ResetOp : Memory_Op<
 }
 
 def Quantum_SplitOp : Memory_Op<
-        "split",
-        [
-          MemoryEffects<[
-            MemRead,
-            MemWrite
-          ]>,
-          NoClone]> {
+  "split",
+  [
+    MemoryEffects<[
+      MemRead,
+      MemWrite
+    ]>,
+    NoClone,
+    DeclareOpInterfaceMethods<
+      InferRegisterRangesInterface, ["inferResultRanges"]
+    >
+  ]> {
     let summary = "Split a qubit register into two sub-registers.";
     let description = [{
     Example: 
@@ -304,13 +322,17 @@ def Quantum_SplitOp : Memory_Op<
 }
 
 def Quantum_MergeOp : Memory_Op<
-        "merge",
-        [
-          MemoryEffects<[
-            MemRead,
-            MemWrite
-          ]>,
-          NoClone]> {
+  "merge",
+  [
+    MemoryEffects<[
+      MemRead,
+      MemWrite
+    ]>,
+    NoClone,
+    DeclareOpInterfaceMethods<
+      InferRegisterRangesInterface, ["inferResultRanges"]
+    >
+  ]> {
     let summary = "Combine qubit registers into a single one.";
     let description = [{
     Example:

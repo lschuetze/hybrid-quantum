@@ -17,6 +17,7 @@
 #include <llvm/ADT/APInt.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/SmallVectorExtras.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/Error.h>
@@ -116,18 +117,44 @@ void AllocOp::inferResultRanges(
     SetRangeFn setResultRanges)
 {
     auto zero = llvm::APInt(64, 0);
-    auto size = llvm::APInt(64, getResult().getType().getSize() - 1);
+    auto size = llvm::APInt(64, getResult().getType().getSize());
     ConstantIntRanges range(zero, size, zero, size);
     setResultRanges(
         getResult(),
         RegisterRanges(ConstantRegisterRanges(getResult(), range)));
 }
 
-void DeallocateOp::inferResultRanges(
-    ArrayRef<RegisterRanges>,
-    SetRangeFn setResultRanges)
+void DeallocateOp::inferResultRanges(ArrayRef<RegisterRanges>, SetRangeFn)
 {
     return;
+}
+
+void SplitOp::inferResultRanges(
+    ArrayRef<RegisterRanges> argRanges,
+    SetRangeFn setResultRanges)
+{
+    // Split op takes an input and returns multiple outputs each holding a
+    // subintervals
+    assert(argRanges.size() == 1 && "Only expect a single input to split");
+    RegisterRanges splitRange = argRanges[0];
+    for (auto result : getResults()) {
+        auto ty = llvm::dyn_cast_if_present<QubitType>(result.getType());
+        if (!ty) continue;
+        auto resRange = splitRange.take_front(ty.getSize());
+        splitRange = splitRange.drop_front(ty.getSize());
+        setResultRanges(result, resRange);
+    }
+}
+
+void MergeOp::inferResultRanges(
+    ArrayRef<RegisterRanges> argRanges,
+    SetRangeFn setResultRanges)
+{
+    RegisterRanges result;
+    for (RegisterRanges arg : argRanges)
+        result = RegisterRanges::join(result, arg);
+
+    setResultRanges(getResult(), result);
 }
 
 //===----------------------------------------------------------------------===//
@@ -240,8 +267,8 @@ LogicalResult SplitOp::verify()
     return success();
 }
 
-// NOTE: We assume N qubit device that may or may not have passive qubits. The
-// required qubits is thus the max qubit index regardless of topology.
+// NOTE: We assume N qubit device that may or may not have passive qubits.
+// The required qubits is thus the max qubit index regardless of topology.
 // LogicalResult DeviceOp::verify()
 // {
 //     int64_t num_qubits = getQubits();
@@ -259,7 +286,8 @@ LogicalResult SplitOp::verify()
 //         for (Attribute qubit : edgeArray) {
 //             IntegerAttr qubitAttr = dyn_cast<IntegerAttr>(qubit);
 //             if (!qubitAttr)
-//                 return emitOpError("each qubit in edge must be an integer");
+//                 return emitOpError("each qubit in edge must be an
+//                 integer");
 //             int64_t q = qubitAttr.getInt();
 //             if (q < 0 || q >= num_qubits)
 //                 return emitOpError(

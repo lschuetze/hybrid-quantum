@@ -1,14 +1,16 @@
 // RUN: quantum-opt %s -split-input-file -convert-scf-to-rvsdg | FileCheck %s
 
 // CHECK-LABEL: func.func @if_to_rvsdg_gamma_qillr(
-// CHECK-SAME: %[[B:.*]]: i1, %[[Q:.*]]: !qillr.qubit) -> !qillr.qubit
-func.func @if_to_rvsdg_gamma_qillr(%b : i1, %q : !qillr.qubit) -> (!qillr.qubit) {
+// CHECK-SAME: %[[B:.*]]: i1) -> !qillr.qubit
+func.func @if_to_rvsdg_gamma_qillr(%b : i1) -> (!qillr.qubit) {
+  // CHECK: %[[Q:.*]] = "qillr.alloc"() <{size = 1 : i64}> : () -> !qillr.qubit
+  %q = "qillr.alloc"() <{size = 1 : i64}> : () -> (!qillr.qubit)
   // CHECK-DAG: %[[PRED:.*]] = rvsdg.match(%[[B]] : i1) [#rvsdg.matchRule<1 -> 0>, #rvsdg.matchRule<0 -> 1>] -> <2>
   // CHECK-DAG: %[[QR:.*]] = rvsdg.gamma(%[[PRED]] : <2>) (%[[Q]]: !qillr.qubit) : [
   // CHECK-NEXT:   (%[[Q1:.*]]: !qillr.qubit): {
   scf.if %b {
-    // CHECK:         "qillr.H"(%[[Q1]]) : (!qillr.qubit) -> ()
-    "qillr.H" (%q) : (!qillr.qubit) -> ()
+    // CHECK:         "qillr.H"(%[[Q1]]) <{index = [0]}> : (!qillr.qubit) -> ()
+    "qillr.H" (%q) <{index = [0]}> : (!qillr.qubit) -> ()
     // CHECK:         rvsdg.yield (%[[Q1]]: !qillr.qubit)
     // CHECK-NEXT:   },
   }

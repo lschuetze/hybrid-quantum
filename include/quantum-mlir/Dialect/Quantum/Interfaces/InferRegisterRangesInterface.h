@@ -13,6 +13,7 @@
 
 #include "mlir/IR/OpDefinition.h"
 
+#include <cstddef>
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/STLExtras.h>
@@ -51,7 +52,7 @@ public:
 
     RegisterRanges(ConstantRegisterRanges range) { ranges.push_back(range); }
 
-    RegisterRanges(llvm::SmallVector<ConstantRegisterRanges> ranges)
+    RegisterRanges(llvm::ArrayRef<ConstantRegisterRanges> ranges)
             : ranges(std::move(ranges))
     {}
 
@@ -104,6 +105,10 @@ public:
             if (ranges == entry) return true;
         return false;
     }
+
+    RegisterRanges take_front(size_t N = 1) const;
+
+    RegisterRanges drop_front(size_t N = 1) const;
 
 private:
     llvm::SmallVector<ConstantRegisterRanges> ranges;

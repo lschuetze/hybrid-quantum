@@ -39,22 +39,22 @@ func.func @rvsdg_gamma_to_if_qillr(%b : i1) {
           #rvsdg.matchRule<0 -> 1>,
           #rvsdg.matchRule<1 -> 0>
   ] -> !rvsdg.ctrl<2>
-  // CHECK: %[[Q:.*]] = "qillr.alloc"() : () -> !qillr.qubit
-  %q = "qillr.alloc"() : () -> !qillr.qubit
+  // CHECK: %[[Q:.*]] = "qillr.alloc"() <{size = 1 : i64}>  : () -> !qillr.qubit
+  %q = "qillr.alloc"() <{size = 1 : i64}> : () -> !qillr.qubit
   // CHECK: scf.if %[[B]] {
-  // CHECK: "qillr.X"(%[[Q]]) : (!qillr.qubit) -> ()
+  // CHECK: "qillr.X"(%[[Q]]) <{index = [0]}> : (!qillr.qubit) -> ()
   // CHECK: }
   %q2 = rvsdg.gamma (%predicate : !rvsdg.ctrl<2>) (%q : !qillr.qubit):[
       (%arg1 : !qillr.qubit):{
-          "qillr.X"(%arg1) : (!qillr.qubit) -> ()
+          "qillr.X"(%arg1) <{index = [0]}> : (!qillr.qubit) -> ()
           rvsdg.yield (%arg1 : !qillr.qubit)
       },
       (%arg2 : !qillr.qubit):{
           rvsdg.yield (%arg2 : !qillr.qubit)
       }
   ] -> !qillr.qubit
-  // CHECK: "qillr.deallocate"(%[[Q]]) : (!qillr.qubit) -> ()
-  "qillr.deallocate" (%q2) : (!qillr.qubit) -> ()
+  // CHECK: "qillr.deallocate"(%[[Q]]) <{inputIndex = [0]}> : (!qillr.qubit) -> ()
+  "qillr.deallocate" (%q2) <{inputIndex = [0]}> : (!qillr.qubit) -> ()
   // CHECK: return
   return
 }

@@ -45,16 +45,15 @@ static void populateDialectQILLRSubmodule(nb::module_ m)
 
     qubitType.def_classmethod(
         "get",
-        [](nb::object cls, MlirContext context, uint64_t size) {
+        [](nb::object cls, MlirContext context) {
             CollectDiagnosticsToStringScope scope(context);
-            MlirType type = mlirQubitTypeGet(context, size);
+            MlirType type = mlirQubitTypeGet(context);
             if (mlirTypeIsNull(type))
                 throw nb::value_error(scope.takeMessage().c_str());
             return cls(type);
         },
         nb::arg("cls"),
-        nb::arg("context").none() = nb::none(),
-        nb::arg("size"));
+        nb::arg("context").none() = nb::none());
 
     //===--------------------------------------------------------------------===//
     // ResultType
@@ -64,16 +63,15 @@ static void populateDialectQILLRSubmodule(nb::module_ m)
 
     resultType.def_classmethod(
         "get",
-        [](nb::object cls, MlirContext context, uint64_t size) {
+        [](nb::object cls, MlirContext context) {
             CollectDiagnosticsToStringScope scope(context);
-            MlirType type = mlirResultTypeGet(context, size);
+            MlirType type = mlirResultTypeGet(context);
             if (mlirTypeIsNull(type))
                 throw nb::value_error(scope.takeMessage().c_str());
             return cls(type);
         },
         nb::arg("cls"),
-        nb::arg("context").none() = nb::none(),
-        nb::arg("size"));
+        nb::arg("context").none() = nb::none());
 }
 
 NB_MODULE(_mlirDialectsQILLR, m)

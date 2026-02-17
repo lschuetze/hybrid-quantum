@@ -23,9 +23,9 @@ bool mlirTypeIsAQubitType(MlirType type)
     return isa<QubitType>(unwrap(type));
 }
 
-MlirType mlirQubitTypeGet(MlirContext ctx, int64_t size)
+MlirType mlirQubitTypeGet(MlirContext ctx)
 {
-    return wrap(QubitType::get(unwrap(ctx), size));
+    return wrap(QubitType::get(unwrap(ctx)));
 }
 
 //===---------------------------------------------------------------------===//
@@ -37,7 +37,7 @@ bool mlirTypeIsAResultType(MlirType type)
     return isa<ResultType>(unwrap(type));
 }
 
-MlirType mlirResultTypeGet(MlirContext ctx, int64_t size)
+MlirType mlirResultTypeGet(MlirContext ctx)
 {
-    return wrap(ResultType::get(unwrap(ctx), size));
+    return wrap(ResultType::get(unwrap(ctx)));
 }
