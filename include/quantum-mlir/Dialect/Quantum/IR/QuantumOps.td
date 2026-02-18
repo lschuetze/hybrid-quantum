@@ -838,7 +838,9 @@ def Quantum_MeasureOp : Memory_Op<
     MemoryEffects<[MemRead]>,
     AllTypesMatch<["input", "result"]>,
     NoClone,
-    InferRegisterRangesInterface
+    DeclareOpInterfaceMethods<
+      InferRegisterRangesInterface, ["inferResultRanges"]
+    >
   ]> {
     let summary = "Measure a qubit register of size N.";
     let description = [{

@@ -1,4 +1,5 @@
-// RUN: %PYTHON qasm-import -i %s -r | FileCheck %s
+// RUN: %PYTHON qasm-import -i %s -r | quantum-opt --convert-quantum-to-qillr | FileCheck %s
+
 
 // CHECK: "builtin.module"() ({
 // CHECK:   "qpu.module"() <{sym_name = "qpu"}> ({
@@ -43,7 +44,7 @@
 // CHECK:       %[[q24:.*]] = "quantum.reset"(%[[q22]]) : (!quantum.qubit<1>) -> !quantum.qubit<1>
 // CHECK:       "quantum.deallocate"(%[[q23]]) : (!quantum.qubit<1>) -> ()
 // CHECK:       "quantum.deallocate"(%[[q24]]) : (!quantum.qubit<1>) -> ()
-// CHECK:       %[[q25:.*]] = "tensor.from_elements"(%[[q8]], %[[q17]]) : (tensor<1xi1>, tensor<1xi1>) -> tensor<2xi1>
+// CHECK:       %[[q25:.*]] = "tensor.concat"(%[[q8]], %[[q17]]) : (tensor<1xi1>, tensor<1xi1>) -> tensor<2xi1>
 // CHECK:       "qpu.return"(%[[q25]]) : (tensor<2xi1>) -> ()
 // CHECK:     }) : () -> ()
 // CHECK:   }) : () -> ()

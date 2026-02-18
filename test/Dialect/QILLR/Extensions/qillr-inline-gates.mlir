@@ -10,8 +10,8 @@
 // CHECK-LABEL: func.func @test_gate_inlining(
 // CHECK: ) {
 func.func @test_gate_inlining() {
-  // CHECK-NEXT: %[[Q:.+]] = "qillr.alloc"() : () -> !qillr.qubit
-  %q = "qillr.alloc"() : () -> (!qillr.qubit)
+  // CHECK-NEXT: %[[Q:.+]] = "qillr.alloc"() <{size = 1 : i64}> : () -> !qillr.qubit
+  %q = "qillr.alloc"() <{size = 1 : i64}> : () -> (!qillr.qubit)
   // CHECK-NEXT: "qillr.X"(%[[Q]]) : (!qillr.qubit) -> ()
   "qillr.call"(%q) <{callee = @test}> : (!qillr.qubit) -> ()
   // CHECK-NEXT: "qillr.reset"(%[[Q]]) : (!qillr.qubit) -> ()

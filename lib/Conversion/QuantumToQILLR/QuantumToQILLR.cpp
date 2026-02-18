@@ -29,6 +29,7 @@
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/SmallVectorExtras.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/LogicalResult.h>
 #include <mlir/Analysis/DataFlow/ConstantPropagationAnalysis.h>
@@ -38,6 +39,7 @@
 #include <mlir/Dialect/Func/Transforms/OneToNFuncConversions.h>
 #include <mlir/IR/BuiltinAttributeInterfaces.h>
 #include <mlir/IR/BuiltinAttributes.h>
+#include <mlir/IR/IRMapping.h>
 #include <mlir/Interfaces/InferIntRangeInterface.h>
 #include <utility>
 
@@ -73,11 +75,13 @@ struct IndexTrackingOpConversionPattern : public OpConversionPattern<OpT> {
 public:
     IndexTrackingOpConversionPattern(
         mlir::DataFlowSolver &solver,
+        IRMapping &cregs,
         const TypeConverter &typeConverter,
         MLIRContext* context,
         PatternBenefit benefit = 1)
             : OpConversionPattern<OpT>(typeConverter, context, benefit),
-              solver(solver)
+              solver(solver),
+              cregs(cregs)
     {}
 
     LogicalResult lookupSingle(
@@ -87,6 +91,7 @@ public:
 
 protected:
     mlir::DataFlowSolver &solver;
+    IRMapping &cregs;
 
 }; // struct IndexTrackingOpConversionPattern
 
@@ -202,28 +207,54 @@ struct ConvertMeasure
         MeasureOpAdaptor adaptor,
         ConversionPatternRewriter &rewriter) const override
     {
-        auto opType = op.getResult().getType();
-        auto loc = op.getLoc();
+        // The quantum measurement looks like follows:
+        // %c = ... tensor<1xi1>
+        // %m, %q1 = measure(%q) : qubit<1> -> measurement<1>, qubit<1>
+        // %t = to_tensor(%m) -> tensor<1xi1>
+        // %cnew = insert_slice(%t, %c) {0} -> tensor<1xi1>
+        auto measurement = op.getMeasurement();
+        auto toTensorOp = llvm::filter_to_vector(
+            measurement.getUsers(),
+            [](Operation* op) { return llvm::isa<ToTensorOp>(op); });
+        assert(toTensorOp.size() == 1 && "Only one use implemented.");
+        auto insertSliceOpV = llvm::filter_to_vector(
+            toTensorOp[0]->getResult(0).getUsers(),
+            [](Operation* op) { return llvm::isa<tensor::InsertSliceOp>(op); });
+        assert(insertSliceOpV.size() == 1 && "Only one use implemented.");
+        auto insertSliceOp =
+            llvm::cast<tensor::InsertSliceOp>(insertSliceOpV[0]);
+        auto creg = insertSliceOp.getDest();
 
-        // auto resultAlloc = rewriter.create<qillr::AllocResultOp>(
-        //     loc,
-        //     qillr::ResultType::get(op.getContext(), opType.getSize()));
-        // rewriter.create<qillr::MeasureOp>(loc, adaptor.getInput(),
-        // resultAlloc); auto readMeasurement =
-        // rewriter.create<qillr::ReadMeasurementOp>(
-        //     loc,
-        //     resultAlloc.getResult());
+        if (!cregs.contains(creg)) {
+            // Create qillr.ralloc
+            auto resultAlloc = rewriter.create<qillr::AllocResultOp>(
+                op->getLoc(),
+                qillr::ResultType::get(op.getContext()),
+                creg.getType().getRank());
+            cregs.map(creg, resultAlloc.getResult());
+        }
+        auto resultAlloc = cregs.lookup(creg);
 
-        // auto i1Type = rewriter.getI1Type();
-        // auto genTensorType = mlir::RankedTensorType::get({1}, i1Type);
-        // auto tensor = rewriter.create<tensor::FromElementsOp>(
-        //     loc,
-        //     genTensorType,
-        //     readMeasurement.getResult());
+        std::optional<uint64_t> qubitIndex;
+        auto result = this->lookupSingle(op.getInput(), qubitIndex, rewriter);
+        if (failed(result)) return result;
 
-        // rewriter.replaceOpWithMultiple(
-        //     op,
-        //     {tensor.getResult(), adaptor.getInput()});
+        std::optional<uint64_t> resultIndex = insertSliceOp.getStaticOffset(0);
+        rewriter.create<qillr::MeasureOp>(
+            op->getLoc(),
+            adaptor.getInput(),
+            resultAlloc,
+            qubitIndex,
+            resultIndex);
+
+        auto readMeasurement = rewriter.create<qillr::ReadMeasurementOp>(
+            op->getLoc(),
+            creg.getType(),
+            resultAlloc);
+
+        rewriter.replaceOp(insertSliceOp, readMeasurement);
+        rewriter.replaceOp(op, {readMeasurement, adaptor.getInput()});
+        rewriter.eraseOp(toTensorOp[0]);
         return success();
     }
 }; // struct ConvertMeasure
@@ -415,6 +446,7 @@ void ConvertQuantumToQILLRPass::runOnOperation()
     auto context = &getContext();
     ConversionTarget target(*context);
     RewritePatternSet patterns(context);
+    IRMapping mapping;
 
     typeConverter.addConversion([](Type ty) { return ty; });
     typeConverter.addConversion([](quantum::QubitType ty) {
@@ -430,6 +462,7 @@ void ConvertQuantumToQILLRPass::runOnOperation()
 
     quantum::populateConvertQuantumToQILLRPatterns(
         solver,
+        mapping,
         typeConverter,
         patterns);
     populateFuncTypeConversionPatterns(typeConverter, patterns);
@@ -456,6 +489,7 @@ void ConvertQuantumToQILLRPass::runOnOperation()
 
 void mlir::quantum::populateConvertQuantumToQILLRPatterns(
     mlir::DataFlowSolver &solver,
+    IRMapping &mapping,
     TypeConverter &typeConverter,
     RewritePatternSet &patterns)
 {
@@ -479,6 +513,7 @@ void mlir::quantum::populateConvertQuantumToQILLRPatterns(
         ConvertSplit,
         ConvertMerge>(
         solver,
+        mapping,
         typeConverter,
         patterns.getContext(),
         /* benefit*/ 1);

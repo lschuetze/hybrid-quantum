@@ -801,7 +801,8 @@ def QASMToMLIR(code: str, emitResults: bool) -> Module:
             resType: RankedTensorType = RankedTensorType.get([len(m)], IntegerType.get_signless(1))
             qpu_main.attributes["function_type"] = TypeAttr.get(func.FunctionType.get([], [resType]))
             # Merge all measurements into a tensor and return it
-            res: Value = tensor.FromElementsOp(resType, m, ip=InsertionPoint(qpu_main.body.blocks[0])).result
+            dim = IntegerAttr.get(IntegerType.get_signless(64), 0)
+            res: Value = tensor.ConcatOp(resType, dim, m, ip=InsertionPoint(qpu_main.body.blocks[0])).result
             qpu.ReturnOp([res], ip=InsertionPoint(qpu_main.body.blocks[0]))
 
         device.bodyRegion.blocks[0].append(qpu_main)

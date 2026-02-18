@@ -157,6 +157,13 @@ void MergeOp::inferResultRanges(
     setResultRanges(getResult(), result);
 }
 
+void MeasureOp::inferResultRanges(
+    ArrayRef<RegisterRanges> argRanges,
+    SetRangeFn setResultRanges)
+{
+    setResultRanges(getResult(), argRanges[0]);
+}
+
 //===----------------------------------------------------------------------===//
 // Canonicalization
 //===----------------------------------------------------------------------===//
