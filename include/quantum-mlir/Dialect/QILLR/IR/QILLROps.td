@@ -223,9 +223,7 @@ def QILLR_U3Op : Gate_Op<"U3", [MemoryEffects<[MemRead, MemWrite]>]> {
     F64:$theta,
     F64:$phi,
     F64:$lambda,
-    OptionalProp<I64Prop>:$thetaIndex,
-    OptionalProp<I64Prop>:$phiIndex,
-    OptionalProp<I64Prop>:$lambdaIndex
+    OptionalProp<I64Prop>:$index
   );
 }
 
