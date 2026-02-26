@@ -1,8 +1,7 @@
-"""# QASM to Quantum MLIR frontend.
-#
-# Frontend generating Quantum dialect code from QASM2 and QASM3 code.
-#
-# @author  Lars Schütze (lars.schuetze@tu-dresden.de)
+"""QASM to Quantum MLIR frontend.
+
+Frontend generating Quantum dialect code from QASM2 and QASM3 code.
+@author  Lars Schütze (lars.schuetze@tu-dresden.de)
 """
 
 from __future__ import annotations
@@ -61,14 +60,20 @@ from qiskit.qasm2.parse import LEGACY_CUSTOM_INSTRUCTIONS
 from qiskit.qasm2.parse import _DefinedGate as QASM2_Gate
 
 
-class ConversionError(RuntimeError): ...
+class ConversionError(RuntimeError):
+    """Throw error with information from parser."""
+
+    ...
 
 
-class ParseError(RuntimeError): ...
+class ParseError(RuntimeError):
+    """Throw error with information from parser."""
+
+    ...
 
 
 class QASMVersion(Enum):
-    """Specify the QASM version the frontend conforms to"""
+    """Specify the QASM version the frontend conforms to."""
 
     Unspecified = 0
     QASM_2_0 = 1
@@ -109,20 +114,27 @@ class Interval:
     value: Value = field(compare=False)
 
     def contains(self, key: int) -> bool:
-        return self.start <= key <= self.end
+        """Check if `key` is in [start, end)."""
+        return self.start <= key < self.end
 
     def __len__(self):
-        return self.end - self.start + 1
+        """Compute size of interval."""
+        return self.end - self.start
 
 
 class IntervalMap:
+    """Map intervals to their respective SSA value."""
+
     def __init__(self):
+        """Construct new `IntervalMap` with no intervals."""
         self._intervals: list[Interval] = []
 
     def __len__(self):
+        """Return the number of intervals."""
         return len(self._intervals)
 
     def get(self, key: int) -> Value | None:
+        """Return the interval for `key`."""
         starts = [iv.start for iv in self._intervals]
         i = bisect_right(starts, key) - 1
         if i >= 0 and self._intervals[i].contains(key):
@@ -130,6 +142,7 @@ class IntervalMap:
         return None
 
     def interval_containing(self, key: int) -> Interval:
+        """Return the interval containing `key` throws `KeyError` if there is no such interval."""
         starts = [iv.start for iv in self._intervals]
         i = bisect_right(starts, key) - 1
         if i < 0 or key > self._intervals[i].end:
