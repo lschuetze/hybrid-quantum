@@ -1,17 +1,36 @@
+# Exclude common build and virtualenv artifacts
 extend-exclude = [".venv", "build", "lit.cfg.py"]
 
 # Assume Python 3.12
 target-version = "py312"
 
+# Match your existing formatting preference
 line-length = 130
 
-[lint]
 
-select = ["E", "F", "W", "I", "UP", "PT", "TID251", "INP"]
+[lint]
+# Existing rule sets + documentation checks
+select = ["E", "F", "W", "I", "UP", "PT", "TID251", "INP", "D"]
+
+# Existing ignores + reasonable docstring relaxations
 ignore = [
-    "E741",  # https://beta.ruff.rs/docs/rules/ambiguous-variable-name/
-    "PT006", # https://beta.ruff.rs/docs/rules/pytest-parametrize-names-wrong-type/
-    "PT011", # https://beta.ruff.rs/docs/rules/pytest-raises-too-broad/
-    "PT012", # https://beta.ruff.rs/docs/rules/pytest-raises-with-multiple-statements/
+    "E741",  # ambiguous variable name
+    "PT006", # pytest-parametrize-names-wrong-type
+    "PT011", # pytest-raises-too-broad
+    "PT012", # pytest-raises-with-multiple-statements
     "INP001",
+
+    # Docstring rules to relax globally
+    "D100",  # missing docstring in public module
+    "D104",  # missing docstring in public package
+    "D107",  # missing docstring in __init__
+
+    # D - PEP 257 / Google-friendly
+    "D203", # one-blank-line-before-class (conflicts with D211)
+    "D213", # summary-on-second-line (conflicts with D212)
 ]
+
+
+[lint.per-file-ignores]
+# Disable docstring enforcement OUTSIDE the QASM frontend
+"!frontend/qasm/**/*.py" = ["D"]

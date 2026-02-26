@@ -1,4 +1,5 @@
-"""
+"""# QASM to Quantum MLIR frontend.
+#
 # Frontend generating Quantum dialect code from QASM2 and QASM3 code.
 #
 # @author  Lars Schütze (lars.schuetze@tu-dresden.de)
@@ -66,21 +67,26 @@ class ConversionError(RuntimeError): ...
 class ParseError(RuntimeError): ...
 
 
-# Specify the QASM version the frontend conforms to
 class QASMVersion(Enum):
+    """Specify the QASM version the frontend conforms to"""
+
     Unspecified = 0
     QASM_2_0 = 1
     QASM_3_0 = 2
 
 
-# Types that can be coerced to a valid Qubit specifier in a circuit.
 type QubitSpecifier = Qubit | QuantumRegister
+"""
+Types that can be coerced to a valid Qubit specifier in a circuit.
+"""
 # int,
 # slice,
 # Sequence[Union[Qubit, int]],
 
-# Types that can be coerced to a valid Clbit specifier in a circuit.
 type ClbitSpecifier = Clbit | ClassicalRegister
+"""
+Types that can be coerced to a valid Clbit specifier in a circuit.
+"""
 # int,
 # slice,
 # Sequence[Union[Clbit, int]],
@@ -88,8 +94,18 @@ type ClbitSpecifier = Clbit | ClassicalRegister
 
 @dataclass(order=True)
 class Interval:
+    """The `Interval` class represents half-open interval [start, end)."""
+
     start: int
+    """
+    The value `start` is inclusive
+    """
+
     end: int
+    """
+    The value `end` is exclusive
+    """
+
     value: Value = field(compare=False)
 
     def contains(self, key: int) -> bool:
@@ -121,6 +137,7 @@ class IntervalMap:
         return self._intervals[i]
 
     def add(self, start: int, end: int, value: Value):
+        """Map `value` to interval [start, end)."""
         if start > end:
             raise ValueError(f"start {start} must be <= end {end}")
 
@@ -138,6 +155,7 @@ class IntervalMap:
         self._intervals.insert(i, new)
 
     def remove(self, start: int, end: int) -> Value:
+        """Remove interval [start, end)."""
         starts = [iv.start for iv in self._intervals]
         i = bisect_left(starts, start)
 
@@ -150,15 +168,25 @@ class IntervalMap:
         raise KeyError(f"Interval [{start}, {end}] not found")
 
     def replace_interval(self, old: Interval, new: list[Interval]):
+        """Replace interval of a quantum register with a list of new intervals.
+
+        New intervals should be non-overlapping and the union of each interval should be the same as the original interval.
+        """
         self.remove(old.start, old.end)
         for iv in new:
             self.add(iv.start, iv.end, iv.value)
 
     def __repr__(self):
+        """Print the interval map contents."""
         return f"IntervalMap({self._intervals})"
 
 
 class Scope:
+    """Scope circuit qubits and quantum registers to respective SSA values.
+
+    The scope also handles visited gates and returns SSA regions representing those gates.
+    """
+
     def __init__(self):
         # Maps circuit quantum registers to quantum.qubit values
         self._registers: dict[QuantumRegister, IntervalMap] = {}
@@ -171,6 +199,7 @@ class Scope:
 
     @classmethod
     def from_scope(cls, other: Scope) -> Scope:
+        """Create GateScope from existing Scope."""
         new = cls()
 
         # Copy quantum registers + interval maps
@@ -187,39 +216,51 @@ class Scope:
         return new
 
     def intervals(self, reg: QuantumRegister):
+        """Return all intervals of a quantum register."""
         return self._registers.setdefault(reg, IntervalMap())
 
     def lookup(self, reg: QuantumRegister, index: int) -> Interval:
+        """Check if the quantum register includes the index."""
         iv = self.intervals(reg).interval_containing(index)
         if iv is None:
             raise KeyError(f"No qubit at index {index}")
         return iv
 
     def replace(self, reg: QuantumRegister, old: Interval, new: list[Interval]):
+        """Replace interval of a quantum register with a list of new intervals.
+
+        New intervals should be non-overlapping and the union of each interval should be the same as the original interval.
+        """
         imap = self.intervals(reg)
+        # TODO: replace by imap.replace(...)
         imap.remove(old.start, old.end)
         for iv in new:
             imap.add(iv.start, iv.end, iv.value)
 
     def findResult(self, c: ClbitSpecifier) -> Value | None:
+        """Get current SSA value holding the measurement result."""
         if isinstance(c, ClassicalRegister):
             return self.cregs.get(c)
         if isinstance(c, Clbit):
             return self.clbits.get(c)
 
     def setResult(self, c: ClbitSpecifier, measurement: Value) -> None:
+        """Store current SSA value holding measurement result."""
         if isinstance(c, ClassicalRegister):
             self.cregs[c] = measurement
         if isinstance(c, Clbit):
             self.clbits[c] = measurement
 
     def findGate(self, gate: QASM2_Gate) -> quantum.GateOp:
+        """Find SSA region for the gate."""
         return self._visited_gates.get(str(gate.name))
 
     def setGate(self, gate: QASM2_Gate, newGate: quantum.GateOp) -> None:
+        """Store SSA region for the gate."""
         self._visited_gates[str(gate.name)] = newGate
 
     def set_qreg(self, q: QuantumRegister, alloc: Value) -> Value:
+        """Initialize quantum register to its length."""
         if q in self._registers:
             raise ParseError(f"Quantum register {q} already initialized")
 
@@ -229,8 +270,9 @@ class Scope:
         return alloc
 
     def find_qubit(self, q: Qubit | QuantumRegister) -> Value | None:
+        """Return SSA `!quantum.qubit<N>` value of q."""
         if isinstance(q, QuantumRegister):
-            im = self._registers.get(q)
+            im: IntervalMap | None = self._registers.get(q)
             if im is None:
                 return None
             if len(im) != 1:
@@ -238,7 +280,7 @@ class Scope:
             return im._intervals[0].value
 
         if isinstance(q, Qubit):
-            im = self._registers.get(q._register)
+            im: IntervalMap | None = self._registers.get(q._register)
             if im is None:
                 return None
             return im.get(q._index)
@@ -246,7 +288,8 @@ class Scope:
         raise TypeError(q)
 
     def bind_qubit(self, qreg: QuantumRegister, start: int, end: int, alloc: Value) -> Value:
-        im = self._registers.get(qreg)
+        """Store mapping from quantum register SSA value to interval."""
+        im: IntervalMap | None = self._registers.get(qreg)
         if im is None:
             raise ParseError(f"Register {qreg} not initialized")
 
@@ -261,6 +304,7 @@ class Scope:
         return alloc
 
     def update_qubit(self, q: Qubit, new_value: Value) -> Value:
+        """Update SSA value of qubit `q`."""
         im = self._registers.get(q._register)
         if im is None:
             raise ParseError(f"Register {q._register} not initialized")
@@ -276,7 +320,51 @@ class Scope:
         return new_value
 
 
+class GateScope(Scope):
+    """GateScope represents scope handling within gates."""
+
+    def __init__(self):
+        super().__init__()
+        # Maps gate qubit to current quantum.qubit value
+        # Never empty because initially starts as BlockArgument
+        self._qubits: dict[Qubit, Value] = {}
+
+    @classmethod
+    def from_scope(cls, other: Scope) -> GateScope:
+        """Create GateScope from existing Scope."""
+        new = cls()
+
+        # Copy quantum registers + interval maps
+        for qreg, im in other._registers.items():
+            new_im = IntervalMap()
+            for iv in im._intervals:
+                new_im.add(iv.start, iv.end, iv.value)
+            new._registers[qreg] = new_im
+
+        new._visited_gates = dict(other._visited_gates)
+        new.cregs = dict(other.cregs)
+        new.clbits = dict(other.clbits)
+
+        return new
+
+    def update_qubit(self, q: Qubit, new_value: Value) -> Value:
+        """Update SSA value of qubit `q`."""
+        self._qubits[q] = new_value
+        return new_value
+
+    def find_qubit(self, q: Qubit | QuantumRegister) -> Value | None:
+        """Return SSA `!quantum.qubit<1>` value of q."""
+        assert isinstance(q, Qubit)
+
+        value: Value | None = self._qubits.get(q)
+        if value is None:
+            raise ParseError(f"Qubit {q} not found in GateScope.")
+        return value
+
+
 class QASMToMLIRVisitor:
+    """Visitor pattern to visit Qiskit QuantumCircuit."""
+
     def __init__(
         self, compat: QASMVersion, context: Context, module: qpu.QPUModuleOp, loc: Location, block: Block, scope: Scope
     ) -> None:
@@ -289,6 +377,7 @@ class QASMToMLIRVisitor:
 
     @classmethod
     def fromParent(cls, parent: QASMToMLIRVisitor, *, block: Block | None = None, scope: Scope | None = None):
+        """Create a new scope copying from an existing visitor's scope."""
         return cls(
             parent.compat,
             parent.context,
@@ -299,6 +388,10 @@ class QASMToMLIRVisitor:
         )
 
     def visitCircuit(self, circuit: QuantumCircuit, *, emitRegisters: bool = False) -> None:
+        """Visit each instruction inside a quantum circuit.
+
+        A quantum circuit might be a complete circuit or the body of a gate.
+        """
         if emitRegisters:
             for qreg in circuit.qregs:
                 self.visitQuantumRegister(qreg)
@@ -316,6 +409,10 @@ class QASMToMLIRVisitor:
                 raise ParseError(f"Unknown instruction: {instr} of type {type(instr)}")
 
     def visitQuantumRegister(self, reg: QuantumRegister) -> Value:
+        """Return the SSA value representing the quantum register.
+
+        In Quantum MLIR this is a `!quantum.qubit<N>` with `N` >= 1.
+        """
         assert isinstance(reg, QuantumRegister)
         alloc: Value | None = self.scope.find_qubit(reg)
         if alloc is None:
@@ -326,51 +423,53 @@ class QASMToMLIRVisitor:
         return alloc
 
     def visitQuantumBit(self, q: Qubit) -> Value:
-        """
-        Return the `!quantum.qubit<1>` value that represents `q`.
+        """Return the SSA `!quantum.qubit<1>` value that represents `q`.
+
         If `q` is currently represented as a multi-qubit<N> value
-        it wille be split accordingly. The new value is returned.
+        it will be split accordingly. The new value is returned.
         """
         assert isinstance(q, Qubit)
 
-        iv: Interval = self.scope.lookup(q._register, q._index)
-        if len(iv) >= 2:
-            # split iv and replace intervals
-            if q._index == iv.start:
-                # For q[0] we split qreg := q, qs
-                qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
-                qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, len(iv) - 1)
-                split: quantum.SplitOp = quantum.split(
-                    [qubitLTy, qubitRTy], iv.value, loc=self.loc, ip=InsertionPoint(self.block)
-                )
-                ileft: Interval = Interval(q._index, q._index, split[0])
-                iright: Interval = Interval(q._index + 1, iv.end, split[1])
-                self.scope.replace(q._register, iv, [ileft, iright])
-                return ileft.value
-            elif q._index == len(iv) - 1:
-                # for q[n], n == len(q) we split qreg := ql, q
-                qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, len(iv) - 1)
-                qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
-                split: quantum.SplitOp = quantum.SplitOp(
-                    [qubitLTy, qubitRTy], iv.value, loc=self.loc, ip=InsertionPoint(self.block)
-                )
-                ileft: Interval = Interval(iv.start, iv.end - 1, split[0])
-                iright: Interval = Interval(iv.end, iv.end, split[1])
-                self.scope.replace(q._register, iv, [ileft, iright])
-                return iright.value
-            else:
-                # For q[n], 0 <= n <= len(q) we split qreg := ql, q, qs
-                qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, q._index - iv.start)
-                qubitMidTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
-                qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, iv.end - q._index)
-                split: quantum.SplitOp = quantum.SplitOp(
-                    [qubitLTy, qubitMidTy, qubitRTy], iv.value, loc=self.loc, ip=InsertionPoint(self.block)
-                )
-                ileft: Interval = Interval(iv.start, q._index - 1, split[0])
-                imid: Interval = Interval(q._index, q._index, split[1])
-                iright: Interval = Interval(q._index + 1, iv.end, split[2])
-                self.scope.replace(q._register, iv, [ileft, imid, iright])
-                return imid.value
+        # If we visit a qubit inside a gate _register and _index are None
+        if q._register is not None and q._index is not None:
+            iv: Interval = self.scope.lookup(q._register, q._index)
+            if len(iv) >= 2:
+                # split iv and replace intervals
+                if q._index == iv.start:
+                    # For q[0] we split qreg := q, qs
+                    qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
+                    qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, len(iv) - 1)
+                    split: list[Value] = quantum.split(
+                        [qubitLTy, qubitRTy], iv.value, loc=self.loc, ip=InsertionPoint(self.block)
+                    )
+                    ileft: Interval = Interval(q._index, q._index, split[0])
+                    iright: Interval = Interval(q._index + 1, iv.end, split[1])
+                    self.scope.replace(q._register, iv, [ileft, iright])
+                    return ileft.value
+                elif q._index == len(iv) - 1:
+                    # for q[n], n == len(q) we split qreg := ql, q
+                    qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, len(iv) - 1)
+                    qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
+                    split: list[Value] = quantum.split(
+                        [qubitLTy, qubitRTy], iv.value, loc=self.loc, ip=InsertionPoint(self.block)
+                    )
+                    ileft: Interval = Interval(iv.start, iv.end - 1, split[0])
+                    iright: Interval = Interval(iv.end, iv.end, split[1])
+                    self.scope.replace(q._register, iv, [ileft, iright])
+                    return iright.value
+                else:
+                    # For q[n], 0 <= n <= len(q) we split qreg := ql, q, qs
+                    qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, q._index - iv.start)
+                    qubitMidTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
+                    qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, iv.end - q._index)
+                    split: list[Value] = quantum.split(
+                        [qubitLTy, qubitMidTy, qubitRTy], iv.value, loc=self.loc, ip=InsertionPoint(self.block)
+                    )
+                    ileft: Interval = Interval(iv.start, q._index - 1, split[0])
+                    imid: Interval = Interval(q._index, q._index, split[1])
+                    iright: Interval = Interval(q._index + 1, iv.end, split[2])
+                    self.scope.replace(q._register, iv, [ileft, imid, iright])
+                    return imid.value
 
         qv: Value | None = self.scope.find_qubit(q)
         if qv is None:
@@ -378,6 +477,11 @@ class QASMToMLIRVisitor:
         return qv
 
     def visitClassicalRegister(self, creg: ClassicalRegister) -> Value:
+        """Generate MLIR SSA value to represent a classical register.
+
+        Classical registers are represented by `RankedTensor` types.
+        A register is initialized to all zero.
+        """
         assert isinstance(creg, ClassicalRegister)
         calloc: Value | None = self.scope.findResult(creg)
         if calloc is None:
@@ -392,6 +496,10 @@ class QASMToMLIRVisitor:
         return calloc
 
     def visitClassic(self, expr: Expr) -> Value:
+        """Handle classical instructions.
+
+        This may be expressions for classical parameters such as angle computations.
+        """
         if isinstance(expr, ParameterExpression):
             raise NotImplementedError("Parameter Expression")
         elif isinstance(expr, float):
@@ -399,13 +507,15 @@ class QASMToMLIRVisitor:
         else:
             raise NotImplementedError(f"Classic expressions are not supported for {expr}")
 
-    # Operation encapsulates virtual instructions that must
-    # be synthesized to physical instructions
     def visitQuantum(self, instr: Operation) -> None:
+        """Handle virtual instructions.
+
+        Operation encapsulates virtual instructions that must be synthesized to physical instructions.
+        """
         raise NotImplementedError(f"Virtual quantum expressions are not supported for {instr}")
 
-    # Instruction represents physical quantum instructions
     def visitInstruction(self, instr: Instruction, qubits: list[QubitSpecifier], clbits: list[ClbitSpecifier]) -> None:
+        """Delegate to a function that can handle `instr`."""
         match instr, len(qubits):
             case lib.Barrier(), _:
                 with self.loc:
@@ -604,13 +714,13 @@ class QASMToMLIRVisitor:
                     StringAttr.get(str(instr.name)),
                     TypeAttr.get(gty),
                     loc=self.loc,
-                    ip=InsertionPoint.at_block_begin(self.module.body),
+                    ip=InsertionPoint.at_block_begin(self.module.bodyRegion.blocks[0]),
                 )
                 gateBody: Block = gate.body.blocks.append(*inputTypes, arg_locs=[self.loc] * len(inputTypes))
 
                 self.scope.setGate(instr, gate)
                 circuit: QuantumCircuit = instr.definition
-                inner_gate_scope: Scope = Scope.from_scope(self.scope)
+                inner_gate_scope: Scope = GateScope.from_scope(self.scope)
                 for q, v in zip(circuit.qubits, gate.body.blocks[0].arguments):
                     inner_gate_scope.update_qubit(q, v)
 
@@ -735,6 +845,7 @@ class QASMToMLIRVisitor:
 
 
 def qasm_version(code: str) -> QASMVersion:
+    """Parse version string found in `.qasm` file."""
     match = re.search(r"OPENQASM\s+(\d+)\.(\d+);", code)
 
     if match:
@@ -750,6 +861,7 @@ def qasm_version(code: str) -> QASMVersion:
 
 
 def QASMToMLIR(code: str, emitResults: bool) -> Module:
+    """Set up parser and dialects."""
     compat: QASMVersion = qasm_version(code)
     circuit: QuantumCircuit
 
@@ -835,11 +947,13 @@ def bit_at(n: int, i: int) -> int:
 
 
 def int_to_bits(x: int, n: int) -> list[int]:
+    """Create bit-string from unsigned integer."""
     return [(x >> i) & 1 for i in range(n)]
 
 
 # TODO: Replace by arith.ConstantOp.create_index()
 def index_const(v: int, *, context: Context, loc: Location, ip: InsertionPoint) -> Value:
+    """Create MLIR `index` value."""
     return arith.ConstantOp(
         IndexType.get(context),
         v,
@@ -849,5 +963,6 @@ def index_const(v: int, *, context: Context, loc: Location, ip: InsertionPoint) 
 
 
 def iter_block_args(bal: BlockArgumentList):
+    """Make `BlockArgumentList` iterable."""
     for i in range(len(bal)):
         yield bal[i]

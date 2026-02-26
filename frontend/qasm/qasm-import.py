@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""
-# Frontend generating QILLR dialect code from QASM2 and QASM3 code.
+"""# Frontend generating QILLR dialect code from QASM2 and QASM3 code.
 #
 # @author  Washim Neupane (washim.neupane@outlook.com)
 # @author  Lars Schütze (lars.schuetze@tu-dresden.de)
 """
 
 import argparse
+import faulthandler
 import sys
 
 from mlir_quantum.ir import Module
 
 
 def main():
+    faulthandler.enable()
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input", help="Input QASM file")
     parser.add_argument("-o", "--output", help="Output MLIR file")

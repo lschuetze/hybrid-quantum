@@ -48,8 +48,8 @@ add_lit_testsuite(${PROJECT_NAME}
     DEPENDS
         ${TEST_DEPENDS}
 )
-add_lit_testsuites(QUANTUMMLIR
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    DEPENDS
-        ${TEST_DEPENDS}
-)
+# add_lit_testsuites(QUANTUMMLIR
+#     ${CMAKE_CURRENT_SOURCE_DIR}
+#     DEPENDS
+#         ${TEST_DEPENDS}
+# )

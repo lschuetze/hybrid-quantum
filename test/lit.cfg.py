@@ -15,7 +15,10 @@ config.name = "quantum-mlir"
 config.test_format = lit.formats.ShTest(not llvm_config.use_lit_shell)
 
 # suffixes: A list of file extensions to treat as test files.
-config.suffixes = [".mlir"]
+config.suffixes = [
+    ".mlir",
+    ".py"
+]
 
 # test_source_root: The root path where tests are located.
 config.test_source_root = os.path.dirname(__file__)
@@ -43,7 +46,14 @@ def add_runtime(name):
 # excludes: A list of directories to exclude from the testsuite. The 'Inputs'
 # subdirectories contain auxiliary inputs for various tests in their parent
 # directories.
-config.excludes = ["Inputs", "CMakeLists.txt", "README.md", "LICENSE.txt"]
+config.excludes = [
+    "Inputs",
+    "CMakeLists.txt",
+    "README.md",
+    "LICENSE.txt",
+    "lit.cfg.py",
+    "__init__.py"
+]
 
 config.substitutions.append(("%PATH%", config.environment["PATH"]))
 config.substitutions.append(("%shlibext", config.llvm_shlib_ext))
@@ -64,8 +74,10 @@ tool_dirs = [config.quantum_tools_dir, config.llvm_tools_dir]
 tools = [
     "quantum-opt",
     "mlir-runner",
+    "mlir-translate",
     add_runtime("mlir_runner_utils"),
     add_runtime("mlir_c_runner_utils"),
+    "not"
 ]
 
 # Find QASM frontend
@@ -77,5 +89,24 @@ tools.extend(
         ToolSubst("qasm-import", qasm_import, unresolved="ignore"),
     ]
 )
+
+#python_executable = config.python_executable
+
+# Add the python path for both the source and binary tree.
+# Note that presently, the python sources come from the source tree and the
+# binaries come from the build tree. This should be unified to the build tree
+# by copying/linking sources to build.
+if config.enable_bindings_python:
+    config.environment["PYTHONPATH"] = os.getenv("MLIR_LIT_PYTHONPATH", "")
+    
+    llvm_config.with_environment(
+        "PYTHONPATH",
+        [
+            os.path.join(config.quantum_obj_root, "python_packages", "quantum"),
+            os.path.join(config.quantum_obj_root, "python_packages", "quantum_test"),
+            os.path.join(config.quantum_src_root),
+        ],
+        append_path=True,
+    )
 
 llvm_config.add_tool_substitutions(tools, tool_dirs)
