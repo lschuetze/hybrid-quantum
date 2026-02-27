@@ -37,6 +37,18 @@ def test_interval_contains():
         assert not interval.contains(4)
 
 
+# CHECK-LABEL: TEST: test_interval_contains2
+@run
+def test_interval_contains2():
+    with Context(), Location.unknown():
+        interval = Interval(0, 1, mock_value())
+
+        # Lower bound inclusive
+        assert interval.contains(0)
+        # Upper bound exclusive
+        assert not interval.contains(1)
+
+
 # CHECK-LABEL: TEST: test_interval_length
 @run
 def test_interval_length():

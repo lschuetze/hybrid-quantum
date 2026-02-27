@@ -151,14 +151,14 @@ class IntervalMap:
 
     def add(self, start: int, end: int, value: Value):
         """Map `value` to interval [start, end)."""
-        if start > end:
-            raise ValueError(f"start {start} must be <= end {end}")
+        if start >= end:
+            raise ValueError(f"start {start} must be < end {end}")
 
         new = Interval(start, end, value)
         i = bisect_left(self._intervals, new)
 
-        # Check left neighbor
-        if i > 0 and self._intervals[i - 1].end >= start:
+        # Check left neighbor. [i-1].end == new.start is allowed (semi-open)
+        if i > 0 and self._intervals[i - 1].end > start:
             raise ValueError("Overlapping or touching interval")
 
         # Check right neighbor
@@ -217,10 +217,10 @@ class Scope:
 
         # Copy quantum registers + interval maps
         for qreg, im in other._registers.items():
-            new_im = IntervalMap()
+            new_imap = IntervalMap()
             for iv in im._intervals:
-                new_im.add(iv.start, iv.end, iv.value)
-            new._registers[qreg] = new_im
+                new_imap.add(iv.start, iv.end, iv.value)
+            new._registers[qreg] = new_imap
 
         new._visited_gates = dict(other._visited_gates)
         new.cregs = dict(other.cregs)
@@ -245,10 +245,7 @@ class Scope:
         New intervals should be non-overlapping and the union of each interval should be the same as the original interval.
         """
         imap = self.intervals(reg)
-        # TODO: replace by imap.replace(...)
-        imap.remove(old.start, old.end)
-        for iv in new:
-            imap.add(iv.start, iv.end, iv.value)
+        imap.replace_interval(old, new)
 
     def findResult(self, c: ClbitSpecifier) -> Value | None:
         """Get current SSA value holding the measurement result."""
@@ -278,7 +275,7 @@ class Scope:
             raise ParseError(f"Quantum register {q} already initialized")
 
         im = IntervalMap()
-        im.add(0, len(q) - 1, alloc)
+        im.add(0, len(q), alloc)
         self._registers[q] = im
         return alloc
 
@@ -325,7 +322,8 @@ class Scope:
         iv = im.interval_containing(q._index)
 
         # Must be exactly a single qubit
-        if iv.start != iv.end:
+        # half-open interval means start == end - 1
+        if iv.start != iv.end - 1:
             raise ParseError(f"Qubit {q} refers to multi-qubit interval {iv}")
 
         # Replace interval value
@@ -455,7 +453,7 @@ class QASMToMLIRVisitor:
                     split: list[Value] = quantum.split(
                         [qubitLTy, qubitRTy], iv.value, loc=self.loc, ip=InsertionPoint(self.block)
                     )
-                    ileft: Interval = Interval(q._index, q._index, split[0])
+                    ileft: Interval = Interval(q._index, q._index + 1, split[0])
                     iright: Interval = Interval(q._index + 1, iv.end, split[1])
                     self.scope.replace(q._register, iv, [ileft, iright])
                     return ileft.value
@@ -467,19 +465,19 @@ class QASMToMLIRVisitor:
                         [qubitLTy, qubitRTy], iv.value, loc=self.loc, ip=InsertionPoint(self.block)
                     )
                     ileft: Interval = Interval(iv.start, iv.end - 1, split[0])
-                    iright: Interval = Interval(iv.end, iv.end, split[1])
+                    iright: Interval = Interval(iv.end - 1, iv.end, split[1])
                     self.scope.replace(q._register, iv, [ileft, iright])
                     return iright.value
                 else:
-                    # For q[n], 0 <= n <= len(q) we split qreg := ql, q, qs
+                    # For q[n], 0 <= n < len(q) we split qreg := ql, q, qs
                     qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, q._index - iv.start)
                     qubitMidTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
                     qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, iv.end - q._index)
                     split: list[Value] = quantum.split(
                         [qubitLTy, qubitMidTy, qubitRTy], iv.value, loc=self.loc, ip=InsertionPoint(self.block)
                     )
-                    ileft: Interval = Interval(iv.start, q._index - 1, split[0])
-                    imid: Interval = Interval(q._index, q._index, split[1])
+                    ileft: Interval = Interval(iv.start, q._index, split[0])
+                    imid: Interval = Interval(q._index, q._index + 1, split[1])
                     iright: Interval = Interval(q._index + 1, iv.end, split[2])
                     self.scope.replace(q._register, iv, [ileft, imid, iright])
                     return imid.value
