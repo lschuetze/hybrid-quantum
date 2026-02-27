@@ -21,6 +21,20 @@ def mock_value(v: int = 0, *, context: Context | None = None, loc: Location | No
     ).result
 
 
+# CHECK-LABEL: TEST: test_interval_len
+@run
+def test_interval_len():
+    with Context(), Location.unknown():
+        iv1 = Interval(0, 1, mock_value())
+        assert len(iv1) == 1
+
+        iv2 = Interval(0, 10, mock_value())
+        assert len(iv2) == 10
+
+        iv3 = Interval(9, 10, mock_value())
+        assert len(iv3) == 1
+
+
 # CHECK-LABEL: TEST: test_interval_contains
 @run
 def test_interval_contains():

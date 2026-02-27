@@ -155,15 +155,26 @@ class IntervalMap:
             raise ValueError(f"start {start} must be < end {end}")
 
         new = Interval(start, end, value)
+        # Trivial case: the intervals is empty
+        if len(self._intervals) == 0:
+            self._intervals.append(new)
+            return
+
         i = bisect_left(self._intervals, new)
 
-        # Check left neighbor. [i-1].end == new.start is allowed (semi-open)
-        if i > 0 and self._intervals[i - 1].end > start:
-            raise ValueError("Overlapping or touching interval")
+        # Append interval at first position
+        if i == 0:
+            if self._intervals[0].start <= start:
+                raise ValueError("Overlapping or touching interval")
+        else:
+            # Append interval somewhere in the list. Check left and right neighbors
+            # Check left neighbor's [i-1].end is not bigger than start (semi-open)
+            if self._intervals[i - 1].end > start:
+                raise ValueError("Overlapping or touching interval")
 
-        # Check right neighbor
-        if i < len(self._intervals) and self._intervals[i].start <= end:
-            raise ValueError("Overlapping or touching interval")
+            # Check right neighbor. [i].start should be >= end
+            if i < len(self._intervals) and self._intervals[i].start < end:
+                raise ValueError("Overlapping or touching interval")
 
         self._intervals.insert(i, new)
 
@@ -457,8 +468,8 @@ class QASMToMLIRVisitor:
                     iright: Interval = Interval(q._index + 1, iv.end, split[1])
                     self.scope.replace(q._register, iv, [ileft, iright])
                     return ileft.value
-                elif q._index == len(iv) - 1:
-                    # for q[n], n == len(q) we split qreg := ql, q
+                elif q._index == iv.end - 1:
+                    # for q[n], n == q.end we split qreg := ql, q
                     qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, len(iv) - 1)
                     qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
                     split: list[Value] = quantum.split(
@@ -470,9 +481,14 @@ class QASMToMLIRVisitor:
                     return iright.value
                 else:
                     # For q[n], 0 <= n < len(q) we split qreg := ql, q, qs
-                    qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, q._index - iv.start)
-                    qubitMidTy: QuantumQubitType = QuantumQubitType.get(self.context, 1)
-                    qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, iv.end - q._index)
+                    size_left = q._index - iv.start
+                    size_mid = 1
+                    size_right = iv.end - q._index - 1
+                    assert size_left + size_mid + size_right == len(iv)
+
+                    qubitLTy: QuantumQubitType = QuantumQubitType.get(self.context, size_left)
+                    qubitMidTy: QuantumQubitType = QuantumQubitType.get(self.context, size_mid)
+                    qubitRTy: QuantumQubitType = QuantumQubitType.get(self.context, size_right)
                     split: list[Value] = quantum.split(
                         [qubitLTy, qubitMidTy, qubitRTy], iv.value, loc=self.loc, ip=InsertionPoint(self.block)
                     )
@@ -919,18 +935,26 @@ def QASMToMLIR(code: str, emitResults: bool) -> Module:
         if not emitResults:
             qpu.ReturnOp([], ip=InsertionPoint(qpu_main.body.blocks[0]))
         else:
-            # Create a new main function with the correct type and move the body to it
+            # Adapt the qpu_main function type to the correct type
             m: list[Value] = [r for _, r in scope.cregs.items() if r is not None]
-            resType: RankedTensorType = RankedTensorType.get([len(m)], IntegerType.get_signless(1))
+            mt: list[RankedTensorType] = [t.type for t in m if isinstance(t.type, RankedTensorType)]
+            total_dim: int = sum(t.get_dim_size(0) for t in mt)
+            resType: RankedTensorType = RankedTensorType.get([total_dim], IntegerType.get_signless(1))
             qpu_main.attributes["function_type"] = TypeAttr.get(func.FunctionType.get([], [resType]))
-            # Merge all measurements into a tensor and return it
-            dim = IntegerAttr.get(IntegerType.get_signless(64), 0)
-            res: Value = tensor.ConcatOp(resType, dim, m, ip=InsertionPoint(qpu_main.body.blocks[0])).result
-            qpu.ReturnOp([res], ip=InsertionPoint(qpu_main.body.blocks[0]))
 
+            if len(m) > 1:
+                # Merge all measurements into a tensor and return it
+                dim = IntegerAttr.get(IntegerType.get_signless(64), 0)
+                res: Value = tensor.ConcatOp(resType, dim, m, ip=InsertionPoint(qpu_main.body.blocks[0])).result
+                qpu.ReturnOp([res], ip=InsertionPoint(qpu_main.body.blocks[0]))
+            else:
+                # Return the only tensor that holds measurements
+                qpu.ReturnOp(m, ip=InsertionPoint(qpu_main.body.blocks[0]))
+
+        # Add qpu_main to qpu.module
         device.bodyRegion.blocks[0].append(qpu_main)
 
-        # Add main function
+        # Add qasm_main function
         res_ty = qpu_main.function_type.value.results
         qasm_main: func.FuncOp = func.FuncOp("qasm_main", ([], res_ty), visibility="public")
         qasm_main.add_entry_block()
