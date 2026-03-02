@@ -1,59 +1,51 @@
 // RUN: %PYTHON qasm-import -i %s -r | quantum-opt --convert-quantum-to-qillr | FileCheck %s
 
 
-// CHECK: "builtin.module"() ({
-// CHECK:   "qpu.module"() <{sym_name = "qpu"}> ({
-// CHECK:     "qpu.circuit"() <{function_type = () -> tensor<2xi1>, sym_name = "main"}> ({
-// CHECK:       %[[q1:.*]] = "quantum.alloc"() : () -> !quantum.qubit<2>
-// CHECK:       %[[q2:.*]] = "arith.constant"() <{value = dense<false> : tensor<1xi1>}> : () -> tensor<1xi1>
-// CHECK:       %[[q3:.*]] = "arith.constant"() <{value = dense<false> : tensor<1xi1>}> : () -> tensor<1xi1>
-// CHECK:       %[[q4:.*]]:2 = "quantum.split"(%[[q1]]) : (!quantum.qubit<2>) -> (!quantum.qubit<1>, !quantum.qubit<1>)
-// CHECK:       %[[q5:.*]]:2 = "quantum.measure"(%[[q4]]#0) : (!quantum.qubit<1>) -> (!quantum.measurement<1>, !quantum.qubit<1>)
-// CHECK:       %[[q6:.*]] = "quantum.to_tensor"(%[[q5]]#0) : (!quantum.measurement<1>) -> tensor<1xi1>
-// CHECK:       %[[q8:.*]] = "tensor.insert_slice"(%[[q6]], %[[q2]]) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>, static_offsets = array<i64: 0>, static_sizes = array<i64: 1>, static_strides = array<i64: 1>}> : (tensor<1xi1>, tensor<1xi1>) -> tensor<1xi1>
-// CHECK:       %[[q9:.*]] = "arith.constant"() <{value = dense<false> : tensor<1xi1>}> : () -> tensor<1xi1>
-// CHECK:       %[[q10:.*]] = "arith.cmpi"(%[[q8]], %[[q9]]) <{predicate = 0 : i64}> : (tensor<1xi1>, tensor<1xi1>) -> tensor<1xi1>
-// CHECK:       %[[q100:.+]] = "arith.constant"() <{value = 0 : index}> : () -> index
-// CHECK:       %[[q11:.+]] = "tensor.extract"(%[[q10]], %[[q100]]) : (tensor<1xi1>, index) -> i1 
-// CHECK:       %[[q12:.*]] = "rvsdg.match"(%[[q11]]) <{mapping = [#rvsdg.matchRule<1 -> 0>, #rvsdg.matchRule<0 -> 1>]}> : (i1) -> !rvsdg.ctrl<2>
-// CHECK:       %[[q13:.*]] = "rvsdg.gamma"(%[[q12]], %[[q5]]#1) ({
-// CHECK:       ^bb0(%[[arg3:.+]]: !quantum.qubit<1>):
-// CHECK:         %[[q27:.*]] = "quantum.X"(%[[arg3]]) : (!quantum.qubit<1>) -> !quantum.qubit<1>
-// CHECK:         "rvsdg.yield"(%[[q27]]) : (!quantum.qubit<1>) -> ()
-// CHECK:       }, {
-// CHECK:       ^bb0(%[[arg2:.+]]: !quantum.qubit<1>):
-// CHECK:         "rvsdg.yield"(%[[arg2]]) : (!quantum.qubit<1>) -> ()
-// CHECK:       }) : (!rvsdg.ctrl<2>, !quantum.qubit<1>) -> !quantum.qubit<1>
-// CHECK:       %[[q14:.*]]:2 = "quantum.measure"(%[[q4]]#1) : (!quantum.qubit<1>) -> (!quantum.measurement<1>, !quantum.qubit<1>)
-// CHECK:       %[[q15:.*]] = "quantum.to_tensor"(%[[q14]]#0) : (!quantum.measurement<1>) -> tensor<1xi1>
-// CHECK:       %[[q17:.*]] = "tensor.insert_slice"(%[[q15]], %[[q3]]) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>, static_offsets = array<i64: 0>, static_sizes = array<i64: 1>, static_strides = array<i64: 1>}> : (tensor<1xi1>, tensor<1xi1>) -> tensor<1xi1>
-// CHECK:       %[[q18:.*]] = "arith.constant"() <{value = dense<false> : tensor<1xi1>}> : () -> tensor<1xi1>
-// CHECK:       %[[q19:.*]] = "arith.cmpi"(%[[q17]], %[[q18]]) <{predicate = 0 : i64}> : (tensor<1xi1>, tensor<1xi1>) -> tensor<1xi1>
-// CHECK:       %[[q200:.+]] = "arith.constant"() <{value = 0 : index}> : () -> index
-// CHECK:       %[[q20:.+]] = "tensor.extract"(%[[q19]], %[[q200]]) : (tensor<1xi1>, index) -> i1 
-// CHECK:       %[[q21:.*]] = "rvsdg.match"(%[[q20]]) <{mapping = [#rvsdg.matchRule<1 -> 0>, #rvsdg.matchRule<0 -> 1>]}> : (i1) -> !rvsdg.ctrl<2>
-// CHECK:       %[[q22:.*]] = "rvsdg.gamma"(%[[q21]], %[[q14]]#1) ({
-// CHECK:       ^bb0(%[[arg1:.+]]: !quantum.qubit<1>):
-// CHECK:         %[[q26:.*]] = "quantum.X"(%[[arg1]]) : (!quantum.qubit<1>) -> !quantum.qubit<1>
-// CHECK:         "rvsdg.yield"(%[[q26]]) : (!quantum.qubit<1>) -> ()
-// CHECK:       }, {
-// CHECK:       ^bb0(%[[arg0:.+]]: !quantum.qubit<1>):
-// CHECK:         "rvsdg.yield"(%[[arg0]]) : (!quantum.qubit<1>) -> ()
-// CHECK:       }) : (!rvsdg.ctrl<2>, !quantum.qubit<1>) -> !quantum.qubit<1>
-// CHECK:       %[[q23:.*]] = "quantum.reset"(%[[q13]]) : (!quantum.qubit<1>) -> !quantum.qubit<1>
-// CHECK:       %[[q24:.*]] = "quantum.reset"(%[[q22]]) : (!quantum.qubit<1>) -> !quantum.qubit<1>
-// CHECK:       "quantum.deallocate"(%[[q23]]) : (!quantum.qubit<1>) -> ()
-// CHECK:       "quantum.deallocate"(%[[q24]]) : (!quantum.qubit<1>) -> ()
-// CHECK:       %[[q25:.*]] = "tensor.concat"(%[[q8]], %[[q17]]) : (tensor<1xi1>, tensor<1xi1>) -> tensor<2xi1>
-// CHECK:       "qpu.return"(%[[q25]]) : (tensor<2xi1>) -> ()
-// CHECK:     }) : () -> ()
-// CHECK:   }) : () -> ()
-// CHECK:   "func.func"() <{function_type = () -> tensor<2xi1>, sym_name = "qasm_main", sym_visibility = "public"}> ({
-// CHECK:     %[[q0:.*]] = "tensor.empty"() : () -> tensor<2xi1>
-// CHECK:     "qpu.execute"(%[[q0]]) <{circuit = @qpu::@main, operandSegmentSizes = array<i32: 0, 1>}> : (tensor<2xi1>) -> ()
-// CHECK:     "func.return"(%[[q0]]) : (tensor<2xi1>) -> ()
-// CHECK:   }) : () -> ()
-// CHECK: }) : () -> ()
+// CHECK: module {
+  // CHECK: qpu.module @qpu {
+    // CHECK: "qpu.circuit"() <{function_type = () -> tensor<2xi1>, sym_name = "main"}> ({
+      // CHECK: %[[QUBIT:.+]] = "qillr.alloc"() <{size = 2 : i64}> : () -> !qillr.qubit
+      // CHECK: %[[CST:.+]] = arith.constant dense<false> : tensor<1xi1>
+      // CHECK: %[[CST_0:.+]] = arith.constant dense<false> : tensor<1xi1>
+      // CHECK: %[[RESULT:.+]] = "qillr.ralloc"() <{size = 1 : i64}> : () -> !qillr.result
+      // CHECK: "qillr.measure"(%[[QUBIT]], %[[RESULT]]) <{inputIndex = [0], resultIndex = [0]}> : (!qillr.qubit, !qillr.result) -> ()
+      // CHECK: %[[MEASUREMENT:.+]] = "qillr.read_measurement"(%[[RESULT]]) <{inputIndex = []}> : (!qillr.result) -> tensor<1xi1>
+      // CHECK: %[[CST_1:.+]] = arith.constant dense<false> : tensor<1xi1>
+      // CHECK: %[[CMP:.+]] = arith.cmpi eq, %[[MEASUREMENT]], %[[CST_1]] : tensor<1xi1>
+      // CHECK: %[[C0:.+]] = arith.constant 0 : index
+      // CHECK: %[[EXTRACTED:.+]] = tensor.extract %[[CMP]][%[[C0]]] : tensor<1xi1>
+      // CHECK: %[[MATCH:.+]] = rvsdg.match(%[[EXTRACTED]] : i1) [#rvsdg.matchRule<1 -> 0>, #rvsdg.matchRule<0 -> 1>] -> <2>
+      // CHECK: %[[GAMMA:.+]] = rvsdg.gamma(%[[MATCH]] : <2>) (%[[QUBIT]]: !qillr.qubit) : [
+        // CHECK: (%[[ARG0:.+]]: !qillr.qubit): {
+          // CHECK: "qillr.X"(%[[ARG0]]) <{index = [0]}> : (!qillr.qubit) -> ()
+          // CHECK: rvsdg.yield (%[[ARG0]]: !qillr.qubit)
+        // CHECK: (%[[ARG0_1:.+]]: !qillr.qubit): {
+          // CHECK: rvsdg.yield (%[[ARG0_1]]: !qillr.qubit)
+      // CHECK: %[[RESULT_1:.+]] = "qillr.ralloc"() <{size = 1 : i64}> : () -> !qillr.result
+      // CHECK: "qillr.measure"(%[[QUBIT]], %[[RESULT_1]]) <{inputIndex = [1], resultIndex = [0]}> : (!qillr.qubit, !qillr.result) -> ()
+      // CHECK: %[[MEASUREMENT_1:.+]] = "qillr.read_measurement"(%[[RESULT_1]]) <{inputIndex = []}> : (!qillr.result) -> tensor<1xi1>
+      // CHECK: %[[CST_2:.+]] = arith.constant dense<false> : tensor<1xi1>
+      // CHECK: %[[CMP_1:.+]] = arith.cmpi eq, %[[MEASUREMENT_1]], %[[CST_2]] : tensor<1xi1>
+      // CHECK: %[[C0_3:.+]] = arith.constant 0 : index
+      // CHECK: %[[EXTRACTED_4:.+]] = tensor.extract %[[CMP_1]][%[[C0_3]]] : tensor<1xi1>
+      // CHECK: %[[MATCH_1:.+]] = rvsdg.match(%[[EXTRACTED_4]] : i1) [#rvsdg.matchRule<1 -> 0>, #rvsdg.matchRule<0 -> 1>] -> <2>
+      // CHECK: %[[GAMMA_1:.+]] = rvsdg.gamma(%[[MATCH_1]] : <2>) (%[[QUBIT]]: !qillr.qubit) : [
+        // CHECK: (%[[ARG0_2:.+]]: !qillr.qubit): {
+          // CHECK: "qillr.X"(%[[ARG0_2]]) <{index = [1]}> : (!qillr.qubit) -> ()
+          // CHECK: rvsdg.yield (%[[ARG0_2]]: !qillr.qubit)
+        // CHECK: (%[[ARG0_3:.+]]: !qillr.qubit): {
+          // CHECK: rvsdg.yield (%[[ARG0_3]]: !qillr.qubit)
+      // CHECK: "qillr.reset"(%[[GAMMA]]) <{inputIndex = [0]}> : (!qillr.qubit) -> ()
+      // CHECK: "qillr.reset"(%[[GAMMA_1]]) <{inputIndex = [1]}> : (!qillr.qubit) -> ()
+      // CHECK: "qillr.deallocate"(%[[GAMMA]]) <{inputIndex = [0]}> : (!qillr.qubit) -> ()
+      // CHECK: "qillr.deallocate"(%[[GAMMA_1]]) <{inputIndex = [1]}> : (!qillr.qubit) -> ()
+      // CHECK: %[[CONCAT:.+]] = tensor.concat dim(0) %[[MEASUREMENT]], %[[MEASUREMENT_1]] : (tensor<1xi1>, tensor<1xi1>) -> tensor<2xi1>
+      // CHECK: "qpu.return"(%[[CONCAT]]) : (tensor<2xi1>) -> ()
+
+  // CHECK: func.func public @qasm_main() -> tensor<2xi1> {
+    // CHECK: %[[EMPTY:.+]] = tensor.empty() : tensor<2xi1>
+    // CHECK: qpu.execute @qpu::@main  outs(%[[EMPTY]] : tensor<2xi1>)
+    // CHECK: return %[[EMPTY]] : tensor<2xi1>
 
 
 OPENQASM 2.0;
