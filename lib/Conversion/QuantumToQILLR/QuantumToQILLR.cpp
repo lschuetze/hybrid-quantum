@@ -5,42 +5,37 @@
 
 #include "quantum-mlir/Conversion/QuantumToQILLR/QuantumToQILLR.h"
 
-#include "mlir/Dialect/Tensor/IR/Tensor.h"
-#include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/PatternMatch.h"
-#include "mlir/Pass/Pass.h"
-#include "mlir/Transforms/DialectConversion.h"
 #include "quantum-mlir/Conversion/RVSDGConversion/RVSDGConversion.h"
-#include "quantum-mlir/Dialect/QILLR/IR/QILLR.h"
 #include "quantum-mlir/Dialect/QILLR/IR/QILLROps.h"
 #include "quantum-mlir/Dialect/QILLR/IR/QILLRTypes.h"
 #include "quantum-mlir/Dialect/Quantum/Analysis/RegisterRangesAnalysis.h"
-#include "quantum-mlir/Dialect/Quantum/IR/Quantum.h"
 #include "quantum-mlir/Dialect/Quantum/IR/QuantumOps.h"
 #include "quantum-mlir/Dialect/Quantum/IR/QuantumTypes.h"
 #include "quantum-mlir/Dialect/Quantum/Interfaces/InferRegisterRangesInterface.h"
-#include "quantum-mlir/Dialect/RVSDG/IR/RVSDGBase.h"
 #include "quantum-mlir/Dialect/RVSDG/IR/RVSDGOps.h"
 
-#include "llvm/Support/Debug.h"
-
 #include <cstddef>
-#include <iterator>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/SmallVectorExtras.h>
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/Debug.h>
 #include <llvm/Support/LogicalResult.h>
 #include <mlir/Analysis/DataFlow/ConstantPropagationAnalysis.h>
 #include <mlir/Analysis/DataFlow/DeadCodeAnalysis.h>
 #include <mlir/Analysis/DataFlow/SparseAnalysis.h>
 #include <mlir/Dialect/Func/IR/FuncOps.h>
 #include <mlir/Dialect/Func/Transforms/OneToNFuncConversions.h>
+#include <mlir/Dialect/Tensor/IR/Tensor.h>
 #include <mlir/IR/BuiltinAttributeInterfaces.h>
 #include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/IRMapping.h>
+#include <mlir/IR/PatternMatch.h>
+#include <mlir/IR/Value.h>
 #include <mlir/Interfaces/InferIntRangeInterface.h>
+#include <mlir/Pass/Pass.h>
+#include <mlir/Transforms/DialectConversion.h>
 #include <utility>
 
 #define DEBUG_TYPE "quantum-qillr-conversion"
@@ -208,32 +203,44 @@ struct ConvertMeasure
         ConversionPatternRewriter &rewriter) const override
     {
         // The quantum measurement looks like follows:
-        // %c = ... tensor<1xi1>
+        // %c = ... tensor<jxi1> with j > i
         // %m, %q1 = measure(%q) : qubit<1> -> measurement<1>, qubit<1>
         // %t = to_tensor(%m) -> tensor<1xi1>
-        // %cnew = insert_slice(%t, %c) {0} -> tensor<1xi1>
-        auto measurement = op.getMeasurement();
+        // %cnew = insert_slice(%t, %c) {i} -> tensor<1xi1>
+        auto m = op.getMeasurement();
         auto toTensorOp = llvm::filter_to_vector(
-            measurement.getUsers(),
+            m.getUsers(),
             [](Operation* op) { return llvm::isa<ToTensorOp>(op); });
         assert(toTensorOp.size() == 1 && "Only one use implemented.");
         auto insertSliceOpV = llvm::filter_to_vector(
-            toTensorOp[0]->getResult(0).getUsers(),
+            toTensorOp.front()->getResult(0).getUsers(),
             [](Operation* op) { return llvm::isa<tensor::InsertSliceOp>(op); });
         assert(insertSliceOpV.size() == 1 && "Only one use implemented.");
         auto insertSliceOp =
-            llvm::cast<tensor::InsertSliceOp>(insertSliceOpV[0]);
+            llvm::cast<tensor::InsertSliceOp>(insertSliceOpV.front());
         auto creg = insertSliceOp.getDest();
 
+        assert(creg.getType().getRank() == 1 && "Only support tensor<?x_>");
+        ::mlir::TypedValue<::mlir::qillr::ResultType> resultAlloc;
         if (!cregs.contains(creg)) {
-            // Create qillr.ralloc
-            auto resultAlloc = rewriter.create<qillr::AllocResultOp>(
-                op->getLoc(),
-                qillr::ResultType::get(op.getContext()),
-                creg.getType().getRank());
-            cregs.map(creg, resultAlloc.getResult());
+            // We have not seen any tensor representing results yet
+            const int64_t length = creg.getType().getDimSize(0);
+            resultAlloc = rewriter
+                              .create<qillr::AllocResultOp>(
+                                  op->getLoc(),
+                                  qillr::ResultType::get(op.getContext()),
+                                  length)
+                              .getResult();
+        } else {
+            // Get the last stored tensor -> result mapping
+            resultAlloc =
+                llvm::dyn_cast_if_present<TypedValue<qillr::ResultType>>(
+                    cregs.lookupOrNull(creg));
         }
-        auto resultAlloc = cregs.lookup(creg);
+        // Update the mapping to the newly created value.
+        // We do not need creg anymore.
+        cregs.erase(creg);
+        cregs.map(insertSliceOp.getResult(), resultAlloc);
 
         std::optional<uint64_t> qubitIndex;
         auto result = this->lookupSingle(op.getInput(), qubitIndex, rewriter);
@@ -438,6 +445,35 @@ struct ConvertCU1 : public IndexTrackingOpConversionPattern<quantum::CU1Op> {
     }
 };
 
+struct ConvertBarrier
+        : public IndexTrackingOpConversionPattern<quantum::BarrierOp> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        BarrierOp op,
+        BarrierOpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        llvm::SmallVector<int64_t> indices;
+        LogicalResult result = LogicalResult::success();
+        for (auto input : op.getInput()) {
+            std::optional<uint64_t> index;
+            result = this->lookupSingle(input, index, rewriter);
+            if (failed(result)) return result;
+            indices.push_back(index.value());
+        }
+
+        auto attr = rewriter.getI64ArrayAttr(indices);
+        rewriter.create<qillr::BarrierOp>(
+            op->getLoc(),
+            adaptor.getInput(),
+            attr);
+
+        rewriter.replaceOp(op, adaptor.getInput());
+        return success();
+    }
+};
+
 } // namespace
 
 void ConvertQuantumToQILLRPass::runOnOperation()
@@ -508,10 +544,12 @@ void mlir::quantum::populateConvertQuantumToQILLRPatterns(
         ConvertRotationOp<quantum::RyOp, qillr::RyOp>,
         ConvertRotationOp<quantum::RzOp, qillr::RzOp>,
         ConvertRotationOp<quantum::PhaseOp, qillr::PhaseOp>,
+        ConvertCU1,
         ConvertCSwap,
         ConvertSwap,
         ConvertSplit,
-        ConvertMerge>(
+        ConvertMerge,
+        ConvertBarrier>(
         solver,
         mapping,
         typeConverter,

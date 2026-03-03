@@ -60,7 +60,7 @@ func.func @rvdsg_gamma_qillr(%b : i1) {
     ] -> !quantum.qubit<1>
     // CHECK: "qillr.H"(%[[QOUT]]) <{index = [0]}> : (!qillr.qubit) -> ()
     %q3 = "quantum.H" (%q2) : (!quantum.qubit<1>) -> !quantum.qubit<1>
-    // CHECK: "qillr.deallocate"(%[[QOUT]]) <{inputIndex = [0]}> : (!qillr.qubit) -> ()
+    // CHECK: "qillr.deallocate"(%[[QOUT]]) <{index = [0]}> : (!qillr.qubit) -> ()
     "quantum.deallocate" (%q3) : (!quantum.qubit<1>) -> ()
     return
 }

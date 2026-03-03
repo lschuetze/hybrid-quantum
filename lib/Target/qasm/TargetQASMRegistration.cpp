@@ -12,6 +12,7 @@
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Tools/mlir-translate/Translation.h"
 #include "quantum-mlir/Dialect/QILLR/IR/QILLRBase.h"
+#include "quantum-mlir/Dialect/QPU/IR/QPUBase.h"
 #include "quantum-mlir/Target/qasm/TargetQASM.h"
 
 using namespace mlir;
@@ -34,5 +35,6 @@ void mlir::qillr::registerQILLRToOpenQASMTranslation()
             registry.insert<arith::ArithDialect>();
             registry.insert<tensor::TensorDialect>();
             registry.insert<scf::SCFDialect>();
+            registry.insert<qpu::QPUDialect>();
         });
 }

@@ -463,7 +463,7 @@ def QILLR_ReadMeasurementOp : QILLR_Op<"read_measurement", [MemoryEffects<[MemRe
   
   let arguments = (ins
     QILLR_ResultType:$input,
-    OptionalProp<I64Prop>:$inputIndex
+    OptionalProp<I64Prop>:$index
   );
   let results = (outs
     QILLR_MeasurementType:$measurement
@@ -476,7 +476,7 @@ def QILLR_ResetOp : QILLR_Op<"reset", [MemoryEffects<[MemRead, MemWrite]>]> {
   
   let arguments = (ins
     Arg<QILLR_QubitType, "", [MemReadAt<0, FullEffect>, MemWriteAt<1, FullEffect>]>:$input,
-    OptionalProp<I64Prop>:$inputIndex
+    OptionalProp<I64Prop>:$index
   );
 }
 
@@ -486,7 +486,7 @@ def QILLR_DeallocateOp : QILLR_Op<"deallocate", [MemoryEffects<[MemFree]>]> {
   
   let arguments = (ins
     Arg<QILLR_QubitType, "", [MemFree]>:$input,
-    OptionalProp<I64Prop>:$inputIndex
+    OptionalProp<I64Prop>:$index
   );
 }
 
