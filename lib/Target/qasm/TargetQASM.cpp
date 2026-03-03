@@ -10,6 +10,8 @@
 #include "quantum-mlir/Target/qasm/TargetQASM.h"
 
 #include "quantum-mlir/Dialect/QILLR/IR/QILLROps.h"
+#include "quantum-mlir/Dialect/QPU/IR/QPU.h"
+#include "quantum-mlir/Dialect/QPU/IR/QPUOps.h"
 
 #include <atomic>
 #include <llvm/ADT/APInt.h>
@@ -76,12 +78,11 @@ static std::string printOperand(Value v)
 }
 
 /// Emit the QASM header
-static LogicalResult printHeader(QASMEmitter &emitter)
+static void printHeader(QASMEmitter &emitter)
 {
     raw_ostream &os = emitter.ostream();
     os << "OPENQASM 2.0;\n"
           "include \"qelib1.inc\";\n\n";
-    return success();
 }
 
 static LogicalResult printQubitAlloc(QASMEmitter &emitter, AllocOp op)
@@ -262,6 +263,20 @@ static LogicalResult printU1(QASMEmitter &emitter, U1Op op)
     return success();
 }
 
+static LogicalResult printCU1(QASMEmitter &emitter, CU1Op op)
+{
+    std::string l = printOperand(op.getAngle());
+    raw_ostream &os = emitter.ostream();
+    std::string control = emitter.getOrCreateQubitRegisterName(op.getControl());
+    std::optional<int64_t> controlIndex = op.getControlIndex();
+    std::string target = emitter.getOrCreateQubitRegisterName(op.getTarget());
+    std::optional<int64_t> targetIndex = op.getTargetIndex();
+
+    os << "cu1(" << l << ") " << control << "[" << controlIndex << "], "
+       << target << "[" << targetIndex << "];\n";
+    return success();
+}
+
 static LogicalResult printIfOp(QASMEmitter &emitter, scf::IfOp ifOp)
 {
     raw_ostream &os = emitter.ostream();
@@ -326,8 +341,6 @@ LogicalResult QASMEmitter::emitOperation(Operation &op)
     LogicalResult result =
         TypeSwitch<Operation*, LogicalResult>(&op)
             // Memory allocations
-            .Case<ModuleOp>(
-                [&]([[maybe_unused]] ModuleOp m) { return printHeader(*this); })
             .Case<AllocOp>([&](AllocOp a) { return printQubitAlloc(*this, a); })
             .Case<AllocResultOp>(
                 [&](AllocResultOp r) { return printResultAlloc(*this, r); })
@@ -369,6 +382,8 @@ LogicalResult QASMEmitter::emitOperation(Operation &op)
             .Case<U3Op>([&](U3Op u3) { return printU3(*this, u3); })
             .Case<U2Op>([&](U2Op u2) { return printU2(*this, u2); })
             .Case<U1Op>([&](U1Op u1) { return printU1(*this, u1); })
+            // CU1 gate
+            .Case<CU1Op>([&](CU1Op cu1) { return printCU1(*this, cu1); })
             // Rx/Ry/Rz gates
             .Case<RxOp>([&](RxOp rx) {
                 return printRotationGate<RxOp>(*this, rx, "rx");
@@ -393,10 +408,15 @@ LogicalResult QASMEmitter::emitOperation(Operation &op)
                 [&](scf::IfOp ifOp) { return printIfOp(*this, ifOp); })
             // Ignored ops
             .Case<
-                arith::ConstantOp,
-                ReadMeasurementOp,
-                DeallocateOp,
+                // QPU dialect
+                qpu::CircuitOp,
+                qpu::ReturnOp,
+                // QILLR
+                qillr::ReadMeasurementOp,
+                qillr::DeallocateOp,
+                // MLIR
                 scf::YieldOp,
+                arith::ConstantOp,
                 arith::CmpIOp,
                 tensor::ExtractOp>([](Operation*) { return success(); })
             // Default = error case
@@ -431,5 +451,10 @@ static LogicalResult walk(QASMEmitter &emitter, Operation* op)
 LogicalResult qillr::QILLRTranslateToQASM(Operation* op, raw_ostream &os)
 {
     QASMEmitter emitter(os);
-    return walk(emitter, op);
+    printHeader(emitter);
+
+    auto result = op->walk<WalkOrder::PreOrder>([&](qpu::CircuitOp circuit) {
+        return WalkResult(walk(emitter, circuit));
+    });
+    return failure(result.wasInterrupted());
 }
