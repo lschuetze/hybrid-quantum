@@ -27,6 +27,7 @@
 #include <llvm/TableGen/Record.h>
 #include <mlir/Dialect/Arith/IR/Arith.h>
 #include <mlir/IR/Diagnostics.h>
+#include <mlir/IR/Matchers.h>
 #include <mlir/IR/OpDefinition.h>
 #include <mlir/IR/PatternMatch.h>
 #include <mlir/IR/Region.h>
@@ -243,6 +244,52 @@ LogicalResult RyOp::canonicalize(RyOp op, PatternRewriter &rewriter)
 }
 
 //===----------------------------------------------------------------------===//
+// Folders
+//===----------------------------------------------------------------------===//
+
+// Free function implementation of foldTrait
+template<typename ConcreteType>
+LogicalResult foldHermitianTraitImpl(
+    Operation* op,
+    ArrayRef<Attribute> operands,
+    SmallVectorImpl<OpFoldResult> &results)
+{
+    if (op->getNumOperands() == 1) {
+        // Check for H * H
+        if (matchPattern(op->getOperand(0), m_Op<ConcreteType>())) {
+            // Add the other's operand to the results vector
+            auto otherOp = op->getOperand(0).getDefiningOp();
+            results.push_back(otherOp->getOperand(0));
+            return success();
+        }
+    } else if (
+        // x, z = CNOT(a, b); CNOT(x, z); := a, b
+        matchPattern(op->getOperand(0), m_Op<ConcreteType>())
+        && matchPattern(op->getOperand(1), m_Op<ConcreteType>())) {
+        if (op->getOperand(0).getDefiningOp()
+            == op->getOperand(1).getDefiningOp()) {
+            // Add the other's operands to the results vector
+            auto otherOp = op->getOperand(0).getDefiningOp();
+            results.push_back(otherOp->getOperand(0));
+            results.push_back(otherOp->getOperand(1));
+            return success();
+        }
+    }
+    return failure();
+}
+
+/// Override the 'foldTrait' hook to support trait based folding on the
+/// concrete operation.
+template<typename ConcreteType>
+LogicalResult Hermitian<ConcreteType>::foldTrait(
+    Operation* op,
+    ArrayRef<Attribute> operands,
+    SmallVectorImpl<OpFoldResult> &results)
+{
+    return foldHermitianTraitImpl<ConcreteType>(op, operands, results);
+}
+
+//===----------------------------------------------------------------------===//
 // Verifier
 //===----------------------------------------------------------------------===//
 
@@ -334,16 +381,6 @@ LogicalResult NoClone<ConcreteType>::verifyTrait(Operation* op)
                    << " used more than once within the same block";
         }
     }
-
-    return success();
-}
-
-template<typename ConcreteType>
-LogicalResult Hermitian<ConcreteType>::verifyTrait(Operation* op)
-{
-    if (op->getNumOperands() != op->getNumResults())
-        return op->emitOpError(
-            "must have the same number of operands and results");
 
     return success();
 }

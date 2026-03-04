@@ -51,10 +51,14 @@ def NoClone : NativeOpTrait<"NoClone"> {
     let cppNamespace = "::mlir::quantum";
 }
 
-//Hermitian trait
 def Hermitian : NativeOpTrait<"Hermitian"> {
+  let cppNamespace = "::mlir::quantum";
+}
+
+def Unitary : NativeOpTrait<"Unitary"> {
     let cppNamespace = "::mlir::quantum";
 }
+
 //===----------------------------------------------------------------------===//
 // Quantum gate operations.
 //===----------------------------------------------------------------------===//
@@ -415,6 +419,7 @@ def Quantum_XOp : PrimitiveGate_Op<
 def Quantum_YOp : PrimitiveGate_Op<
   "Y",
   [
+    Hermitian,
     NoMemoryEffect,
     AllTypesMatch<["input", "result"]>,
     InferRegisterRangesInterface
@@ -428,6 +433,7 @@ def Quantum_YOp : PrimitiveGate_Op<
 def Quantum_ZOp : PrimitiveGate_Op<
   "Z",
   [
+    Hermitian,
     NoMemoryEffect,
     AllTypesMatch<["input", "result"]>,
     InferRegisterRangesInterface
