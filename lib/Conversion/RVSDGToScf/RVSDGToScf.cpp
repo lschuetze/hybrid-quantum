@@ -15,12 +15,16 @@
 #include <algorithm>
 #include <iostream>
 #include <llvm/ADT/STLExtras.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/LogicalResult.h>
 #include <mlir/Dialect/Arith/Utils/Utils.h>
 #include <mlir/Dialect/SCF/IR/SCF.h>
+#include <mlir/IR/Block.h>
 #include <mlir/IR/BuiltinTypes.h>
+#include <mlir/IR/IRMapping.h>
 #include <mlir/IR/OperationSupport.h>
+#include <mlir/IR/TypeRange.h>
 
 using namespace mlir;
 using namespace mlir::rvsdg;
@@ -72,7 +76,7 @@ struct ConvertMatch : public OpConversionPattern<rvsdg::MatchOp> {
         if (adaptor.getInput().getType() != rewriter.getI1Type())
             return failure();
 
-        rewriter.replaceAllUsesWith(op.getResult(), adaptor.getInput());
+        rewriter.replaceAllOpUsesWith(op, adaptor.getInput());
         rewriter.eraseOp(op);
         return success();
     }
@@ -96,8 +100,9 @@ struct ConvertGamma : public OpConversionPattern<rvsdg::GammaNode> {
         if (opResultsEqualOpArgs(op) && elseSize == 1) {
             auto rvsdgYield = op->getRegion(0).front().getTerminator();
             rewriter.eraseOp(rvsdgYield);
-            // We only return captured arguments and do not have an else branch
-            // Create a simple if without results
+
+            //  We only return captured arguments and do not have an else branch
+            //  Create a simple if without results
             auto newIf = rewriter.create<scf::IfOp>(
                 op->getLoc(),
                 adaptor.getPredicate(),
@@ -111,15 +116,14 @@ struct ConvertGamma : public OpConversionPattern<rvsdg::GammaNode> {
                 newBlock->begin(),
                 adaptor.getInputs());
 
-            rewriter.replaceAllUsesWith(op->getResults(), adaptor.getInputs());
-            rewriter.eraseOp(op);
+            rewriter.replaceOp(op, adaptor.getInputs());
         } else {
             auto newIf = rewriter.create<scf::IfOp>(
                 op->getLoc(),
                 op->getResultTypes(),
                 adaptor.getPredicate(),
                 /* addThenBlock */ true,
-                /* addThenBlock */ true);
+                /* addElseBlock */ true);
 
             for (auto &&[oldRegion, newRegion] :
                  llvm::zip(op->getRegions(), newIf->getRegions())) {

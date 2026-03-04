@@ -374,7 +374,7 @@ struct ConvertSwap : public IndexTrackingOpConversionPattern<quantum::SWAPOp> {
         rewriter.replaceOp(op, {qubit1, qubit2});
         return success();
     }
-};
+}; // struct ConvertSwap
 
 struct ConvertCSwap
         : public IndexTrackingOpConversionPattern<quantum::CSWAPOp> {
@@ -410,7 +410,7 @@ struct ConvertCSwap
         rewriter.replaceOp(op, {control, lhs, rhs});
         return success();
     }
-};
+}; // struct ConvertCSwap
 
 struct ConvertCU1 : public IndexTrackingOpConversionPattern<quantum::CU1Op> {
     using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
@@ -443,7 +443,7 @@ struct ConvertCU1 : public IndexTrackingOpConversionPattern<quantum::CU1Op> {
         rewriter.replaceOp(op, {control, target});
         return success();
     }
-};
+}; // struct ConvertCU1
 
 struct ConvertBarrier
         : public IndexTrackingOpConversionPattern<quantum::BarrierOp> {
@@ -472,7 +472,36 @@ struct ConvertBarrier
         rewriter.replaceOp(op, adaptor.getInput());
         return success();
     }
-};
+}; // struct ConvertBarrier
+
+struct ConvertCNOT : public IndexTrackingOpConversionPattern<quantum::CNOTOp> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        CNOTOp op,
+        CNOTOpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        LogicalResult result = LogicalResult::success();
+        std::optional<uint64_t> controlIndex;
+        result = this->lookupSingle(op.getInput(), controlIndex, rewriter);
+        if (failed(result)) return result;
+
+        std::optional<uint64_t> targetIndex;
+        result = this->lookupSingle(op.getTarget(), targetIndex, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<qillr::CNOTOp>(
+            op->getLoc(),
+            adaptor.getInput(),
+            adaptor.getTarget(),
+            controlIndex,
+            targetIndex);
+
+        rewriter.replaceOp(op, {adaptor.getInput(), adaptor.getTarget()});
+        return success();
+    }
+}; // struct ConvertCNOT
 
 } // namespace
 
@@ -549,7 +578,8 @@ void mlir::quantum::populateConvertQuantumToQILLRPatterns(
         ConvertSwap,
         ConvertSplit,
         ConvertMerge,
-        ConvertBarrier>(
+        ConvertBarrier,
+        ConvertCNOT>(
         solver,
         mapping,
         typeConverter,

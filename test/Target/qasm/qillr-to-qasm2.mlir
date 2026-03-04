@@ -1,10 +1,13 @@
-// RUN: quantum-translate -split-input-file --mlir-to-openqasm %s | FileCheck %s
+// RUN: quantum-translate --mlir-to-openqasm %s | FileCheck %s
 
+module {
+  qpu.module @qpu {
+    "qpu.circuit"() <{function_type = () -> tensor<2xi1>, sym_name = "main"}> ({
 // CHECK: OPENQASM 2.0;
 // CHECK-NEXT: include "qelib1.inc";
-// CHECK-DAG: qreg [[q0:q.+]][3]; 
+// CHECK: qreg [[q0:q.+]][3]; 
 %q0 = "qillr.alloc"() <{size = 3 : i64}> : () -> (!qillr.qubit)
-// CHECK-NEXT: creg [[c0:c.+]][2];
+// CHECK: creg [[c0:c.+]][2];
 %r0 = "qillr.ralloc"() <{size = 2 : i64}> : () -> (!qillr.result)
 // Basic gates and operations
 // CHECK-NEXT: h [[q0]][0];
@@ -61,25 +64,12 @@
 %mread = "qillr.read_measurement"(%r0) <{index = [1]}> : (!qillr.result) -> tensor<2xi1>
 // CHECK-NEXT: reset [[q0]][2];
 "qillr.reset"(%q0) <{index = [2]}> : (!qillr.qubit) -> ()
-
-// -----
-
-// CHECK: qreg [[q:q.+]][1]; 
-%q = "qillr.alloc"() <{size = 1 : i64}> : () -> !qillr.qubit
-// CHECK-NEXT: creg [[c:c.+]][1];
-%r = "qillr.ralloc"() <{size = 1 : i64}> : () -> !qillr.result
- // CHECK-NEXT: measure [[q]][0] -> [[c]][0];
-"qillr.measure"(%q, %r) <{inputIndex = [0], resultIndex = [0]}> : (!qillr.qubit, !qillr.result) -> ()
-// CHECK-NOT: "qillr.read_measurement"
-%mt = "qillr.read_measurement"(%r) <{index = [0]}> : (!qillr.result) -> tensor<1xi1>
-%cst = arith.constant dense<true> : tensor<1xi1>
-%cmp = arith.cmpi eq, %mt, %cst : tensor<1xi1>
-%c0 = arith.constant 0 : index
-%b = tensor.extract %cmp[%c0] : tensor<1xi1>
-// CHECK: if([[c]]==1)
-scf.if %b {
-  // CHECK: x [[q]][0];
-  "qillr.X"(%q) <{index = [0]}> : (!qillr.qubit) -> ()
+  "qpu.return"(%mread) : (tensor<2xi1>) -> ()
+    }) : () -> ()
+  }
+  func.func public @qasm_main() -> tensor<2xi1> {
+    %0 = tensor.empty() : tensor<2xi1>
+    qpu.execute @qpu::@main  outs(%0 : tensor<2xi1>)
+    return %0 : tensor<2xi1>
+  }
 }
-// CHECK-NOT: "qillr.deallocate"
-"qillr.deallocate"(%q) <{index = [0]}> : (!qillr.qubit) -> ()

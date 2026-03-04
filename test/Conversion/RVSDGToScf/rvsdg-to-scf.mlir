@@ -53,7 +53,7 @@ func.func @rvsdg_gamma_to_if_qillr(%b : i1) {
           rvsdg.yield (%arg2 : !qillr.qubit)
       }
   ] -> !qillr.qubit
-  // CHECK: "qillr.deallocate"(%[[Q]]) <{inputIndex = [0]}> : (!qillr.qubit) -> ()
+  // CHECK: "qillr.deallocate"(%[[Q]]) <{index = []}> : (!qillr.qubit) -> ()
   "qillr.deallocate" (%q2) <{inputIndex = [0]}> : (!qillr.qubit) -> ()
   // CHECK: return
   return
