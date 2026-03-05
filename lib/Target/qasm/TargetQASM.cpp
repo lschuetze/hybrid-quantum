@@ -284,38 +284,49 @@ static LogicalResult printIfOp(QASMEmitter &emitter, scf::IfOp ifOp)
 
     os << "if(";
 
-    // TODO: Short path if condition is a constant bool
+    // TODO: Short path if condition is a constant boo
     std::string creg;
     std::string condition;
 
-    // Case 1: tensor.extract on the condition and result tensor
-    if (auto extract = llvm::dyn_cast<tensor::ExtractOp>(conditionOp)) {
-        auto cmp = extract.getTensor().getDefiningOp();
-        if (auto cmpOp = llvm::dyn_cast<arith::CmpIOp>(cmp)) {
-            auto mt = llvm::dyn_cast<ReadMeasurementOp>(
-                cmpOp.getLhs().getDefiningOp());
-            creg = emitter.getOrCreateClassicalRegisterName(mt.getInput());
+    // The anchor point: extracting the result of the comparison tensor
+    tensor::ExtractOp extractOp;
 
-            os << creg;
-
-            assert(
-                cmpOp.getPredicate() == arith::CmpIPredicate::eq
-                && "Current support limited to equals");
-            os << "==";
-
-            auto cst = llvm::dyn_cast<arith::ConstantOp>(
-                cmpOp.getRhs().getDefiningOp());
-            auto denseAttr = llvm::dyn_cast<DenseElementsAttr>(cst.getValue());
-
-            APInt cond(denseAttr.getNumElements(), 0);
-            unsigned bitIndex = 0;
-            for (bool value : denseAttr.getValues<bool>())
-                cond.setBitVal(bitIndex++, value);
-
-            os << cond.getZExtValue() << ") ";
-        }
+    // Case 1: scf.parallel reduces over the bits after comparison of
+    // the measurement to an comparison tensor
+    if (auto parallelOp = llvm::dyn_cast<scf::ParallelOp>(conditionOp)) {
+        extractOp =
+            llvm::dyn_cast<tensor::ExtractOp>(parallelOp.getBody()->front());
+    } else {
+        // Case 2: tensor.extract on the condition and result tensor
+        extractOp = llvm::dyn_cast<tensor::ExtractOp>(conditionOp);
     }
-    return success();
+
+    auto cmp = extractOp.getTensor().getDefiningOp();
+    if (auto cmpOp = llvm::dyn_cast<arith::CmpIOp>(cmp)) {
+        auto mt =
+            llvm::dyn_cast<ReadMeasurementOp>(cmpOp.getLhs().getDefiningOp());
+        creg = emitter.getOrCreateClassicalRegisterName(mt.getInput());
+
+        os << creg;
+
+        assert(
+            cmpOp.getPredicate() == arith::CmpIPredicate::eq
+            && "Current support limited to equals");
+        os << "==";
+
+        auto cst =
+            llvm::dyn_cast<arith::ConstantOp>(cmpOp.getRhs().getDefiningOp());
+        auto denseAttr = llvm::dyn_cast<DenseElementsAttr>(cst.getValue());
+
+        APInt cond(denseAttr.getNumElements(), 0);
+        unsigned bitIndex = 0;
+        for (bool value : denseAttr.getValues<bool>())
+            cond.setBitVal(bitIndex++, value);
+
+        os << cond.getZExtValue() << ") ";
+        return success();
+    }
+    return failure();
 }
 
 std::string QASMEmitter::getOrCreateQubitRegisterName(Value value)
@@ -416,8 +427,12 @@ LogicalResult QASMEmitter::emitOperation(Operation &op)
                 qillr::DeallocateOp,
                 // MLIR
                 scf::YieldOp,
+                scf::ParallelOp,
+                scf::ReduceOp,
+                scf::ReduceReturnOp,
                 arith::ConstantOp,
                 arith::CmpIOp,
+                arith::AndIOp,
                 tensor::ExtractOp>([](Operation*) { return success(); })
             // Default = error case
             .Default([](Operation* op) {
