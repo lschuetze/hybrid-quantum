@@ -858,7 +858,7 @@ class QASMToMLIRVisitor:
                                     iv = body.arguments[0]
                                     elem = tensor.extract(cmp, [iv], loc=self.loc)
 
-                                    reduce = scf.ReduceOp([elem, init], 1, loc=self.loc)
+                                    reduce = scf.ReduceOp([elem], 1, loc=self.loc)
                                     reduce_block = Block.create_at_start(reduce.regions[0], arg_types=[i1, i1])
                                     with InsertionPoint(reduce_block):
                                         lhs = reduce_block.arguments[0]
