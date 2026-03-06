@@ -323,6 +323,41 @@ struct ConvertUnaryOp : public IndexTrackingOpConversionPattern<SourceOp> {
 }; // struct ConvertUnaryOp
 
 template<typename SourceOp, typename TargetOp>
+struct ConvertControlledUnaryOp
+        : public IndexTrackingOpConversionPattern<SourceOp> {
+    using IndexTrackingOpConversionPattern<
+        SourceOp>::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        SourceOp op,
+        OpConversionPattern<SourceOp>::OpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        std::optional<uint64_t> controlIndex;
+        auto result =
+            this->lookupSingle(op.getControl(), controlIndex, rewriter);
+        if (failed(result)) return result;
+
+        std::optional<uint64_t> targetIndex;
+        result = this->lookupSingle(op.getTarget(), targetIndex, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<TargetOp>(
+            op.getLoc(),
+            adaptor.getControl(),
+            adaptor.getTarget(),
+            controlIndex,
+            targetIndex);
+
+        if (op->getNumResults() > 0)
+            rewriter.replaceOp(op, adaptor.getOperands());
+        else
+            rewriter.eraseOp(op);
+        return success();
+    }
+}; // struct ConvertControlledUnaryOp
+
+template<typename SourceOp, typename TargetOp>
 struct ConvertRotationOp : public IndexTrackingOpConversionPattern<SourceOp> {
     using IndexTrackingOpConversionPattern<
         SourceOp>::IndexTrackingOpConversionPattern;
@@ -503,6 +538,122 @@ struct ConvertCNOT : public IndexTrackingOpConversionPattern<quantum::CNOTOp> {
     }
 }; // struct ConvertCNOT
 
+struct ConvertU1 : public IndexTrackingOpConversionPattern<quantum::U1Op> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        U1Op op,
+        U1OpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        LogicalResult result = LogicalResult::success();
+        std::optional<uint64_t> index;
+        result = this->lookupSingle(op.getInput(), index, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<qillr::U1Op>(
+            op->getLoc(),
+            adaptor.getInput(),
+            adaptor.getLambda(),
+            index);
+
+        rewriter.replaceOp(op, adaptor.getInput());
+        return success();
+    }
+}; // struct ConvertU1
+
+struct ConvertU2 : public IndexTrackingOpConversionPattern<quantum::U2Op> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        U2Op op,
+        U2OpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        LogicalResult result = LogicalResult::success();
+        std::optional<uint64_t> index;
+        result = this->lookupSingle(op.getInput(), index, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<qillr::U2Op>(
+            op->getLoc(),
+            adaptor.getInput(),
+            adaptor.getPhi(),
+            adaptor.getLambda(),
+            index);
+
+        rewriter.replaceOp(op, adaptor.getInput());
+        return success();
+    }
+}; // struct ConvertU2
+
+struct ConvertU3 : public IndexTrackingOpConversionPattern<quantum::U3Op> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        U3Op op,
+        U3OpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        LogicalResult result = LogicalResult::success();
+        std::optional<uint64_t> index;
+        result = this->lookupSingle(op.getInput(), index, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<qillr::U3Op>(
+            op->getLoc(),
+            adaptor.getInput(),
+            adaptor.getTheta(),
+            adaptor.getPhi(),
+            adaptor.getLambda(),
+            index);
+
+        rewriter.replaceOp(op, adaptor.getInput());
+        return success();
+    }
+}; // struct ConvertU3
+
+struct ConvertToffoli
+        : public IndexTrackingOpConversionPattern<quantum::CCXOp> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        CCXOp op,
+        CCXOpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        LogicalResult result = LogicalResult::success();
+
+        std::optional<uint64_t> control1Index;
+        result = this->lookupSingle(op.getControl1(), control1Index, rewriter);
+        if (failed(result)) return result;
+
+        std::optional<uint64_t> control2Index;
+        result = this->lookupSingle(op.getControl2(), control2Index, rewriter);
+        if (failed(result)) return result;
+
+        std::optional<uint64_t> targetIndex;
+        result = this->lookupSingle(op.getTarget(), targetIndex, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<qillr::CCXOp>(
+            op->getLoc(),
+            adaptor.getControl1(),
+            adaptor.getControl2(),
+            adaptor.getTarget(),
+            control1Index,
+            control2Index,
+            targetIndex);
+
+        rewriter.replaceOp(
+            op,
+            {adaptor.getControl1(),
+             adaptor.getControl2(),
+             adaptor.getTarget()});
+        return success();
+    }
+}; // struct ConvertToffoli
+
 } // namespace
 
 void ConvertQuantumToQILLRPass::runOnOperation()
@@ -569,17 +720,25 @@ void mlir::quantum::populateConvertQuantumToQILLRPatterns(
         ConvertUnaryOp<quantum::ZOp, qillr::ZOp>,
         ConvertUnaryOp<quantum::IdOp, qillr::IdOp>,
         ConvertUnaryOp<quantum::SXOp, qillr::SXOp>,
+        ConvertUnaryOp<quantum::SdgOp, qillr::SdgOp>,
+        ConvertUnaryOp<quantum::TOp, qillr::TOp>,
+        ConvertUnaryOp<quantum::SOp, qillr::SOp>,
         ConvertRotationOp<quantum::RxOp, qillr::RxOp>,
         ConvertRotationOp<quantum::RyOp, qillr::RyOp>,
         ConvertRotationOp<quantum::RzOp, qillr::RzOp>,
         ConvertRotationOp<quantum::PhaseOp, qillr::PhaseOp>,
+        ConvertControlledUnaryOp<quantum::CZOp, qillr::CZOp>,
         ConvertCU1,
         ConvertCSwap,
         ConvertSwap,
         ConvertSplit,
         ConvertMerge,
         ConvertBarrier,
-        ConvertCNOT>(
+        ConvertCNOT,
+        ConvertU1,
+        ConvertU2,
+        ConvertU3,
+        ConvertToffoli>(
         solver,
         mapping,
         typeConverter,
