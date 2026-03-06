@@ -30,6 +30,7 @@
 #include <mlir/Dialect/Tensor/IR/Tensor.h>
 #include <mlir/IR/BuiltinAttributeInterfaces.h>
 #include <mlir/IR/BuiltinAttributes.h>
+#include <mlir/IR/BuiltinTypes.h>
 #include <mlir/IR/IRMapping.h>
 #include <mlir/IR/PatternMatch.h>
 #include <mlir/IR/Value.h>
@@ -197,31 +198,16 @@ struct ConvertMeasure
         : public IndexTrackingOpConversionPattern<quantum::MeasureOp> {
     using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
 
-    LogicalResult matchAndRewrite(
+    LogicalResult rewriteToTensor(
         MeasureOp op,
         MeasureOpAdaptor adaptor,
-        ConversionPatternRewriter &rewriter) const override
+        quantum::ToTensorOp toTensorOp,
+        ConversionPatternRewriter &rewriter) const
     {
-        // The quantum measurement looks like follows:
-        // %c = ... tensor<jxi1> with j > i
-        // %m, %q1 = measure(%q) : qubit<1> -> measurement<1>, qubit<1>
-        // %t = to_tensor(%m) -> tensor<1xi1>
-        // %cnew = insert_slice(%t, %c) {i} -> tensor<1xi1>
-        auto m = op.getMeasurement();
-        auto toTensorOp = llvm::filter_to_vector(
-            m.getUsers(),
-            [](Operation* op) { return llvm::isa<ToTensorOp>(op); });
-        assert(toTensorOp.size() == 1 && "Only one use implemented.");
-        auto insertSliceOpV = llvm::filter_to_vector(
-            toTensorOp.front()->getResult(0).getUsers(),
-            [](Operation* op) { return llvm::isa<tensor::InsertSliceOp>(op); });
-        assert(insertSliceOpV.size() == 1 && "Only one use implemented.");
-        auto insertSliceOp =
-            llvm::cast<tensor::InsertSliceOp>(insertSliceOpV.front());
-        auto creg = insertSliceOp.getDest();
+        TypedValue<RankedTensorType> creg = toTensorOp.getResult();
 
         assert(creg.getType().getRank() == 1 && "Only support tensor<?x_>");
-        ::mlir::TypedValue<::mlir::qillr::ResultType> resultAlloc;
+        TypedValue<::mlir::qillr::ResultType> resultAlloc;
         if (!cregs.contains(creg)) {
             // We have not seen any tensor representing results yet
             const int64_t length = creg.getType().getDimSize(0);
@@ -236,23 +222,76 @@ struct ConvertMeasure
             resultAlloc =
                 llvm::dyn_cast_if_present<TypedValue<qillr::ResultType>>(
                     cregs.lookupOrNull(creg));
+            // We do not need creg anymore.
+            cregs.erase(creg);
         }
         // Update the mapping to the newly created value.
-        // We do not need creg anymore.
-        cregs.erase(creg);
+        cregs.map(creg, resultAlloc);
+
+        std::optional<uint64_t> qubitIndex;
+        auto result = this->lookupSingle(op.getInput(), qubitIndex, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<qillr::MeasureOp>(
+            op->getLoc(),
+            adaptor.getInput(),
+            resultAlloc,
+            qubitIndex,
+            0);
+
+        auto readMeasurement = rewriter.create<qillr::ReadMeasurementOp>(
+            op->getLoc(),
+            creg.getType(),
+            resultAlloc);
+
+        rewriter.replaceOp(toTensorOp, readMeasurement);
+        rewriter.replaceOp(op, {readMeasurement, adaptor.getInput()});
+
+        return success();
+    }
+
+    LogicalResult rewriteInsertSlice(
+        MeasureOp op,
+        MeasureOpAdaptor adaptor,
+        tensor::InsertSliceOp insertSliceOp,
+        quantum::ToTensorOp toTensorOp,
+        ConversionPatternRewriter &rewriter) const
+    {
+        auto creg = insertSliceOp.getDest();
+        assert(creg.getType().getRank() == 1 && "Only support tensor<?x_>");
+
+        TypedValue<::mlir::qillr::ResultType> resultAlloc;
+        if (!cregs.contains(creg)) {
+            // We have not seen any tensor representing results yet
+            const int64_t length = creg.getType().getDimSize(0);
+            resultAlloc = rewriter
+                              .create<qillr::AllocResultOp>(
+                                  op->getLoc(),
+                                  qillr::ResultType::get(op->getContext()),
+                                  length)
+                              .getResult();
+        } else {
+            // Get the last stored tensor -> result mapping
+            resultAlloc =
+                llvm::dyn_cast_if_present<TypedValue<qillr::ResultType>>(
+                    cregs.lookupOrNull(creg));
+            // We do not need creg anymore.
+            cregs.erase(creg);
+        }
+        // Update the mapping to the newly created value.
         cregs.map(insertSliceOp.getResult(), resultAlloc);
 
         std::optional<uint64_t> qubitIndex;
         auto result = this->lookupSingle(op.getInput(), qubitIndex, rewriter);
         if (failed(result)) return result;
 
-        std::optional<uint64_t> resultIndex = insertSliceOp.getStaticOffset(0);
+        int64_t staticOffset = insertSliceOp.getStaticOffset(0);
         rewriter.create<qillr::MeasureOp>(
             op->getLoc(),
             adaptor.getInput(),
             resultAlloc,
             qubitIndex,
-            resultIndex);
+            staticOffset);
 
         auto readMeasurement = rewriter.create<qillr::ReadMeasurementOp>(
             op->getLoc(),
@@ -261,9 +300,53 @@ struct ConvertMeasure
 
         rewriter.replaceOp(insertSliceOp, readMeasurement);
         rewriter.replaceOp(op, {readMeasurement, adaptor.getInput()});
-        rewriter.eraseOp(toTensorOp[0]);
-        return success();
+        rewriter.eraseOp(toTensorOp);
     }
+
+    LogicalResult matchAndRewrite(
+        MeasureOp op,
+        MeasureOpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        // The quantum measurement looks like follows:
+        // %c = ... tensor<jxi1> with j > i
+        // %m, %q1 = measure(%q) : qubit<1> -> measurement<1>, qubit<1>
+        // %t = to_tensor(%m) -> tensor<1xi1>
+        // if the dimension of %t and %c are equal insert_slice is omitted
+        // %cnew = insert_slice(%t, %c) {i} -> tensor<1xi1>
+        LLVM_DEBUG(llvm::dbgs() << "Lower measurement and results \n");
+        auto m = op.getMeasurement();
+        auto toTensorOp = llvm::filter_to_vector(
+            m.getUsers(),
+            [](Operation* op) { return llvm::isa<ToTensorOp>(op); });
+        assert(toTensorOp.size() == 1 && "Only one use implemented.");
+        auto insertSliceOpV = llvm::filter_to_vector(
+            toTensorOp.front()->getResult(0).getUsers(),
+            [](Operation* op) { return llvm::isa<tensor::InsertSliceOp>(op); });
+
+        if (insertSliceOpV.size() == 0) {
+            if (failed(rewriteToTensor(
+                    op,
+                    adaptor,
+                    llvm::cast<quantum::ToTensorOp>(toTensorOp.front()),
+                    rewriter)))
+                return failure();
+        } else if (insertSliceOpV.size() == 1) {
+            if (failed(rewriteInsertSlice(
+                    op,
+                    adaptor,
+                    llvm::cast<tensor::InsertSliceOp>(insertSliceOpV.front()),
+                    llvm::cast<quantum::ToTensorOp>(toTensorOp.front()),
+                    rewriter)))
+                return failure();
+        } else {
+            LLVM_DEBUG(
+                llvm::dbgs() << "toTensorOp is used " << insertSliceOpV.size()
+                             << " times\n");
+            toTensorOp.front()->emitOpError("has unsupported many uses.");
+        }
+        return success();
+    } // namespace
 }; // struct ConvertMeasure
 
 struct ConvertFunc : public IndexTrackingOpConversionPattern<func::FuncOp> {
@@ -381,6 +464,38 @@ struct ConvertRotationOp : public IndexTrackingOpConversionPattern<SourceOp> {
     }
 }; // struct ConvertRotationOp
 
+template<typename SourceOp, typename TargetOp>
+struct ConvertControlledRotationOp
+        : public IndexTrackingOpConversionPattern<SourceOp> {
+    using IndexTrackingOpConversionPattern<
+        SourceOp>::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        SourceOp op,
+        OpConversionPattern<SourceOp>::OpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        std::optional<uint64_t> controlIndex;
+        auto result =
+            this->lookupSingle(op.getControl(), controlIndex, rewriter);
+        if (failed(result)) return result;
+
+        std::optional<uint64_t> targetIndex;
+        result = this->lookupSingle(op.getTarget(), targetIndex, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<TargetOp>(
+            op.getLoc(),
+            adaptor.getControl(),
+            adaptor.getTarget(),
+            adaptor.getAngle(),
+            controlIndex,
+            targetIndex);
+        rewriter.replaceOp(op, {adaptor.getControl(), adaptor.getTarget()});
+        return success();
+    }
+}; // struct ConvertControlledRotationOp
+
 struct ConvertSwap : public IndexTrackingOpConversionPattern<quantum::SWAPOp> {
     using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
 
@@ -446,39 +561,6 @@ struct ConvertCSwap
         return success();
     }
 }; // struct ConvertCSwap
-
-struct ConvertCU1 : public IndexTrackingOpConversionPattern<quantum::CU1Op> {
-    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
-
-    LogicalResult matchAndRewrite(
-        CU1Op op,
-        CU1OpAdaptor adaptor,
-        ConversionPatternRewriter &rewriter) const override
-    {
-        LogicalResult result = LogicalResult::success();
-        std::optional<uint64_t> indexCtrl;
-        std::optional<uint64_t> indexTarget;
-        result = this->lookupSingle(op.getControl(), indexCtrl, rewriter);
-        if (failed(result)) return result;
-        result = this->lookupSingle(op.getTarget(), indexTarget, rewriter);
-        if (failed(result)) return result;
-
-        // Retrieve the two input qubits from the adaptor.
-        Value control = adaptor.getControl();
-        Value target = adaptor.getTarget();
-        Value angle = adaptor.getAngle();
-        rewriter.create<qillr::CU1Op>(
-            op.getLoc(),
-            control,
-            target,
-            angle,
-            indexCtrl,
-            indexTarget);
-
-        rewriter.replaceOp(op, {control, target});
-        return success();
-    }
-}; // struct ConvertCU1
 
 struct ConvertBarrier
         : public IndexTrackingOpConversionPattern<quantum::BarrierOp> {
@@ -722,13 +804,15 @@ void mlir::quantum::populateConvertQuantumToQILLRPatterns(
         ConvertUnaryOp<quantum::SXOp, qillr::SXOp>,
         ConvertUnaryOp<quantum::SdgOp, qillr::SdgOp>,
         ConvertUnaryOp<quantum::TOp, qillr::TOp>,
+        ConvertUnaryOp<quantum::TdgOp, qillr::TdgOp>,
         ConvertUnaryOp<quantum::SOp, qillr::SOp>,
         ConvertRotationOp<quantum::RxOp, qillr::RxOp>,
         ConvertRotationOp<quantum::RyOp, qillr::RyOp>,
         ConvertRotationOp<quantum::RzOp, qillr::RzOp>,
         ConvertRotationOp<quantum::PhaseOp, qillr::PhaseOp>,
         ConvertControlledUnaryOp<quantum::CZOp, qillr::CZOp>,
-        ConvertCU1,
+        ConvertControlledRotationOp<quantum::CRyOp, qillr::CRyOp>,
+        ConvertControlledRotationOp<quantum::CU1Op, qillr::CU1Op>,
         ConvertCSwap,
         ConvertSwap,
         ConvertSplit,
