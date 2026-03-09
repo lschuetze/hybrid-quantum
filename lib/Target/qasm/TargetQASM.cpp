@@ -63,7 +63,6 @@ private:
     std::atomic_int nextRegisterId{0};
     llvm::DenseMap<Value, std::string> names;
 };
-} // namespace
 
 static std::string printOperand(Value v)
 {
@@ -85,7 +84,7 @@ static void printHeader(QASMEmitter &emitter)
           "include \"qelib1.inc\";\n\n";
 }
 
-static LogicalResult printQubitAlloc(QASMEmitter &emitter, AllocOp op)
+LogicalResult printQubitAlloc(QASMEmitter &emitter, AllocOp op)
 {
     std::string name = emitter.getOrCreateQubitRegisterName(op.getResult());
     int64_t size = op.getSize();
@@ -329,6 +328,21 @@ static LogicalResult printIfOp(QASMEmitter &emitter, scf::IfOp ifOp)
     return failure();
 }
 
+static LogicalResult printCSwap(QASMEmitter &emitter, CSwapOp op)
+{
+    raw_ostream &os = emitter.ostream();
+    std::string control = emitter.getOrCreateQubitRegisterName(op.getControl());
+    std::optional<int64_t> controlIndex = op.getControlIndex();
+    std::string lhs = emitter.getOrCreateQubitRegisterName(op.getLhs());
+    std::optional<int64_t> lhsIndex = op.getLhsIndex();
+    std::string rhs = emitter.getOrCreateQubitRegisterName(op.getRhs());
+    std::optional<int64_t> rhsIndex = op.getRhsIndex();
+
+    os << "cswap" << control << "[" << controlIndex << "], " << lhs << "["
+       << lhsIndex << "], " << rhs << "[" << rhsIndex << "]" << ";\n";
+    return success();
+}
+
 std::string QASMEmitter::getOrCreateQubitRegisterName(Value value)
 {
     if (names.contains(value)) return names[value];
@@ -347,107 +361,6 @@ std::string QASMEmitter::getOrCreateClassicalRegisterName(Value value)
     return name;
 }
 
-LogicalResult QASMEmitter::emitOperation(Operation &op)
-{
-    LogicalResult result =
-        TypeSwitch<Operation*, LogicalResult>(&op)
-            // Memory allocations
-            .Case<AllocOp>([&](AllocOp a) { return printQubitAlloc(*this, a); })
-            .Case<AllocResultOp>(
-                [&](AllocResultOp r) { return printResultAlloc(*this, r); })
-            // Single-qubit gates
-            .Case<HOp>(
-                [&](HOp h) { return printPrimitiveGate<HOp>(*this, h, "h"); })
-            .Case<XOp>(
-                [&](XOp x) { return printPrimitiveGate<XOp>(*this, x, "x"); })
-            .Case<YOp>(
-                [&](YOp y) { return printPrimitiveGate<YOp>(*this, y, "y"); })
-            .Case<ZOp>(
-                [&](ZOp z) { return printPrimitiveGate<ZOp>(*this, z, "z"); })
-            .Case<SOp>(
-                [&](SOp s) { return printPrimitiveGate<SOp>(*this, s, "s"); })
-            .Case<SdgOp>([&](SdgOp sdg) {
-                return printPrimitiveGate<SdgOp>(*this, sdg, "sdg");
-            })
-            .Case<TOp>(
-                [&](TOp t) { return printPrimitiveGate<TOp>(*this, t, "t"); })
-            .Case<TdgOp>([&](TdgOp tdg) {
-                return printPrimitiveGate<TdgOp>(*this, tdg, "tdg");
-            })
-            // controlled gates
-            .Case<CNOTOp>([&](CNOTOp cx) {
-                return printControledGate<CNOTOp>(*this, cx, "cx");
-            })
-            .Case<CZOp>([&](CZOp cz) {
-                return printControledGate<CZOp>(*this, cz, "cz");
-            })
-            .Case<CCXOp>([&](CCXOp ccx) { return printToffoli(*this, ccx); })
-            // Controled rotation gates
-            .Case<CRzOp>([&](CRzOp crz) {
-                return printControledRotationGate<CRzOp>(*this, crz, "crz");
-            })
-            .Case<CRyOp>([&](CRyOp cry) {
-                return printControledRotationGate<CRyOp>(*this, cry, "cry");
-            })
-            // U1/U2/U3 gates
-            .Case<U3Op>([&](U3Op u3) { return printU3(*this, u3); })
-            .Case<U2Op>([&](U2Op u2) { return printU2(*this, u2); })
-            .Case<U1Op>([&](U1Op u1) { return printU1(*this, u1); })
-            // CU1 gate
-            .Case<CU1Op>([&](CU1Op cu1) { return printCU1(*this, cu1); })
-            // Rx/Ry/Rz gates
-            .Case<RxOp>([&](RxOp rx) {
-                return printRotationGate<RxOp>(*this, rx, "rx");
-            })
-            .Case<RyOp>([&](RyOp ry) {
-                return printRotationGate<RyOp>(*this, ry, "ry");
-            })
-            .Case<RzOp>([&](RzOp rz) {
-                return printRotationGate<RzOp>(*this, rz, "rz");
-            })
-            // Others
-            .Case<BarrierOp>(
-                [&](BarrierOp barrier) { return printBarrier(*this, barrier); })
-            .Case<SwapOp>([&](SwapOp swap) { return printSwap(*this, swap); })
-            .Case<MeasureOp>(
-                [&](MeasureOp measure) { return printMeasure(*this, measure); })
-            .Case<ResetOp>([&](ResetOp reset) {
-                return printPrimitiveGate<ResetOp>(*this, reset, "reset");
-            })
-            // Structured Control Flow
-            .Case<scf::IfOp>(
-                [&](scf::IfOp ifOp) { return printIfOp(*this, ifOp); })
-            // Ignored ops
-            .Case<
-                // QPU dialect
-                qpu::CircuitOp,
-                qpu::ReturnOp,
-                // QILLR
-                qillr::ReadMeasurementOp,
-                qillr::DeallocateOp,
-                // MLIR
-                scf::YieldOp,
-                scf::ParallelOp,
-                scf::ReduceOp,
-                scf::ReduceReturnOp,
-                arith::ConstantOp,
-                arith::CmpIOp,
-                arith::AndIOp,
-                tensor::ExtractOp>([](Operation*) { return success(); })
-            // Default = error case
-            .Default([](Operation* op) {
-                emitError(
-                    op->getLoc(),
-                    llvm::formatv(
-                        "No codegen for operation {}.",
-                        op->getName()));
-                return failure();
-            });
-
-    if (failed(result)) return failure();
-    return result;
-}
-
 static LogicalResult walk(QASMEmitter &emitter, Operation* op)
 {
     auto walk = op->walk<WalkOrder::PreOrder>([&](Operation* child) {
@@ -461,6 +374,153 @@ static LogicalResult walk(QASMEmitter &emitter, Operation* op)
         return WalkResult(status);
     });
     return failure(walk.wasInterrupted());
+}
+
+template<typename Op, const char* Name>
+struct GateEntry {
+    using OpType = Op;
+    static constexpr const char* name = Name;
+};
+
+template<typename Op>
+struct IgnoredEntry {
+    using OpType = Op;
+};
+
+inline constexpr char H_NAME[] = "h";
+inline constexpr char X_NAME[] = "x";
+inline constexpr char Y_NAME[] = "y";
+inline constexpr char Z_NAME[] = "z";
+inline constexpr char S_NAME[] = "s";
+inline constexpr char SDG_NAME[] = "sdg";
+inline constexpr char T_NAME[] = "t";
+inline constexpr char TDG_NAME[] = "tdg";
+inline constexpr char RESET_NAME[] = "reset";
+
+inline constexpr char RX_NAME[] = "rx";
+inline constexpr char RY_NAME[] = "ry";
+inline constexpr char RZ_NAME[] = "rz";
+
+inline constexpr char CNOT_NAME[] = "cx";
+inline constexpr char CZ_NAME[] = "cz";
+
+inline constexpr char CRZ_NAME[] = "crz";
+inline constexpr char CRY_NAME[] = "cry";
+
+template<typename... Ts>
+struct TypeList {};
+
+using PrimitiveGates = TypeList<
+    GateEntry<HOp, H_NAME>,
+    GateEntry<XOp, X_NAME>,
+    GateEntry<YOp, Y_NAME>,
+    GateEntry<ZOp, Z_NAME>,
+    GateEntry<SOp, S_NAME>,
+    GateEntry<SdgOp, SDG_NAME>,
+    GateEntry<TOp, T_NAME>,
+    GateEntry<TdgOp, TDG_NAME>,
+    GateEntry<ResetOp, RESET_NAME>>;
+
+using RotationGates = TypeList<
+    GateEntry<RxOp, RX_NAME>,
+    GateEntry<RyOp, RY_NAME>,
+    GateEntry<RzOp, RZ_NAME>>;
+
+using ControlledGates =
+    TypeList<GateEntry<CNOTOp, CNOT_NAME>, GateEntry<CZOp, CZ_NAME>>;
+
+using ControlledRotationGates =
+    TypeList<GateEntry<CRzOp, CRZ_NAME>, GateEntry<CRyOp, CRY_NAME>>;
+
+using NoCodeGenOps = TypeList<
+    IgnoredEntry<qpu::CircuitOp>,
+    IgnoredEntry<qpu::ReturnOp>,
+    IgnoredEntry<ReadMeasurementOp>,
+    IgnoredEntry<DeallocateOp>,
+    IgnoredEntry<scf::YieldOp>,
+    IgnoredEntry<scf::ParallelOp>,
+    IgnoredEntry<scf::ReduceOp>,
+    IgnoredEntry<scf::ReduceReturnOp>,
+    IgnoredEntry<arith::ConstantOp>,
+    IgnoredEntry<arith::CmpIOp>,
+    IgnoredEntry<arith::AndIOp>,
+    IgnoredEntry<tensor::ExtractOp>,
+    IgnoredEntry<tensor::ConcatOp>>;
+
+template<typename... Entries, typename Fn>
+void addCases(
+    llvm::TypeSwitch<Operation*, LogicalResult> &ts,
+    Fn fn,
+    TypeList<Entries...>)
+{
+    (ts.template Case<typename Entries::OpType>(
+         [&](typename Entries::OpType op) {
+             return fn.template operator()<Entries>(op);
+         }),
+     ...);
+}
+
+template<auto Fn>
+auto forwardTo(QASMEmitter &emitter)
+{
+    return [&](auto op) -> LogicalResult { return Fn(emitter, op); };
+}
+
+} // namespace
+
+LogicalResult QASMEmitter::emitOperation(Operation &op)
+{
+    auto primitivePrinter = [&]<typename Entries>(auto op) {
+        return printPrimitiveGate(*this, op, Entries::name);
+    };
+    auto rotationPrinter = [&]<typename Entries>(auto op) {
+        return printRotationGate(*this, op, Entries::name);
+    };
+    auto controlledPrinter = [&]<typename Entries>(auto op) {
+        return printControledGate(*this, op, Entries::name);
+    };
+    auto controlledRotationPrinter = [&]<typename Entries>(auto op) {
+        return printControledRotationGate(*this, op, Entries::name);
+    };
+
+    auto ts = TypeSwitch<Operation*, LogicalResult>(&op);
+
+    addCases(ts, primitivePrinter, PrimitiveGates{});
+    addCases(ts, rotationPrinter, RotationGates{});
+    addCases(ts, controlledPrinter, ControlledGates{});
+    addCases(ts, controlledRotationPrinter, ControlledRotationGates{});
+    addCases(
+        ts,
+        [&]<typename Entries>(auto) { return success(); },
+        NoCodeGenOps{});
+
+    LogicalResult result =
+        ts
+            // special cases
+            .Case<AllocOp>(forwardTo<printQubitAlloc>(*this))
+            .Case<AllocResultOp>(forwardTo<printResultAlloc>(*this))
+            .Case<MeasureOp>(forwardTo<printMeasure>(*this))
+            .Case<BarrierOp>(forwardTo<printBarrier>(*this))
+            .Case<CCXOp>(forwardTo<printToffoli>(*this))
+            .Case<SwapOp>(forwardTo<printSwap>(*this))
+            .Case<CSwapOp>(forwardTo<printCSwap>(*this))
+            .Case<U3Op>(forwardTo<printU3>(*this))
+            .Case<U2Op>(forwardTo<printU2>(*this))
+            .Case<U1Op>(forwardTo<printU1>(*this))
+            .Case<CU1Op>(forwardTo<printCU1>(*this))
+            .Case<scf::IfOp>(forwardTo<printIfOp>(*this))
+            // rest unchanged
+            .Default([](Operation* op) {
+                emitError(
+                    op->getLoc(),
+                    llvm::formatv(
+                        "No codegen for operation {}.",
+                        op->getName()));
+                return failure();
+            });
+
+    if (failed(result)) return failure();
+    return result;
 }
 
 LogicalResult qillr::QILLRTranslateToQASM(Operation* op, raw_ostream &os)

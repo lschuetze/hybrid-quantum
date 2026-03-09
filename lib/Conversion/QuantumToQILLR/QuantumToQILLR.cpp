@@ -812,6 +812,7 @@ void mlir::quantum::populateConvertQuantumToQILLRPatterns(
         ConvertRotationOp<quantum::PhaseOp, qillr::PhaseOp>,
         ConvertControlledUnaryOp<quantum::CZOp, qillr::CZOp>,
         ConvertControlledRotationOp<quantum::CRyOp, qillr::CRyOp>,
+        ConvertControlledRotationOp<quantum::CRzOp, qillr::CRzOp>,
         ConvertControlledRotationOp<quantum::CU1Op, qillr::CU1Op>,
         ConvertCSwap,
         ConvertSwap,
