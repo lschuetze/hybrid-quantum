@@ -14,6 +14,7 @@
 #include "quantum-mlir/Dialect/QPU/IR/QPUOps.h"
 
 #include <atomic>
+#include <cstddef>
 #include <llvm/ADT/APInt.h>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/STLExtras.h>
@@ -300,19 +301,14 @@ static LogicalResult printIfOp(QASMEmitter &emitter, scf::IfOp ifOp)
         extractOp = llvm::dyn_cast<tensor::ExtractOp>(conditionOp);
     }
 
-    auto cmp = extractOp.getTensor().getDefiningOp();
-    if (auto cmpOp = llvm::dyn_cast<arith::CmpIOp>(cmp)) {
-        auto mt =
-            llvm::dyn_cast<ReadMeasurementOp>(cmpOp.getLhs().getDefiningOp());
-        creg = emitter.getOrCreateClassicalRegisterName(mt.getInput());
-
-        os << creg;
-
+    auto extractedFromTensorOp = extractOp.getTensor().getDefiningOp();
+    ReadMeasurementOp mt;
+    llvm::SmallString<64> str;
+    if (auto cmpOp = llvm::dyn_cast<arith::CmpIOp>(extractedFromTensorOp)) {
+        mt = llvm::dyn_cast<ReadMeasurementOp>(cmpOp.getLhs().getDefiningOp());
         assert(
             cmpOp.getPredicate() == arith::CmpIPredicate::eq
             && "Current support limited to equals");
-        os << "==";
-
         auto cst =
             llvm::dyn_cast<arith::ConstantOp>(cmpOp.getRhs().getDefiningOp());
         auto denseAttr = llvm::dyn_cast<DenseElementsAttr>(cst.getValue());
@@ -322,10 +318,16 @@ static LogicalResult printIfOp(QASMEmitter &emitter, scf::IfOp ifOp)
         for (bool value : denseAttr.getValues<bool>())
             cond.setBitVal(bitIndex++, value);
 
-        os << cond.getZExtValue() << ") ";
-        return success();
+        cond.toString(str, 10, false);
+    } else if ((mt =
+                    llvm::dyn_cast<ReadMeasurementOp>(extractedFromTensorOp))) {
+        APInt cond = APInt::getAllOnes(mt.getResult().getType().getDimSize(0));
+        cond.toString(str, 10, false);
     }
-    return failure();
+
+    creg = emitter.getOrCreateClassicalRegisterName(mt.getInput());
+    os << creg << "==" << str << ") ";
+    return success();
 }
 
 static LogicalResult printCSwap(QASMEmitter &emitter, CSwapOp op)
@@ -392,8 +394,11 @@ inline constexpr char X_NAME[] = "x";
 inline constexpr char Y_NAME[] = "y";
 inline constexpr char Z_NAME[] = "z";
 inline constexpr char S_NAME[] = "s";
+inline constexpr char P_NAME[] = "p";
 inline constexpr char SDG_NAME[] = "sdg";
 inline constexpr char T_NAME[] = "t";
+inline constexpr char ID_NAME[] = "id";
+inline constexpr char SX_NAME[] = "sx";
 inline constexpr char TDG_NAME[] = "tdg";
 inline constexpr char RESET_NAME[] = "reset";
 
@@ -416,8 +421,11 @@ using PrimitiveGates = TypeList<
     GateEntry<YOp, Y_NAME>,
     GateEntry<ZOp, Z_NAME>,
     GateEntry<SOp, S_NAME>,
+    GateEntry<PhaseOp, P_NAME>,
     GateEntry<SdgOp, SDG_NAME>,
     GateEntry<TOp, T_NAME>,
+    GateEntry<IdOp, ID_NAME>,
+    GateEntry<SXOp, SX_NAME>,
     GateEntry<TdgOp, TDG_NAME>,
     GateEntry<ResetOp, RESET_NAME>>;
 
