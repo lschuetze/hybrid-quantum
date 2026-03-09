@@ -6,11 +6,16 @@
 /// @author     Lars Schütze (lars.schuetze@tu-dresden.de)
 //===----------------------------------------------------------------------===//
 
-#include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Support/LogicalResult.h"
-#include "mlir/Tools/mlir-translate/Translation.h"
 #include "quantum-mlir/Dialect/QILLR/IR/QILLRBase.h"
+#include "quantum-mlir/Dialect/QPU/IR/QPUBase.h"
 #include "quantum-mlir/Target/qasm/TargetQASM.h"
+
+#include <mlir/Dialect/Arith/IR/Arith.h>
+#include <mlir/Dialect/Func/IR/FuncOps.h>
+#include <mlir/Dialect/SCF/IR/SCF.h>
+#include <mlir/Dialect/Tensor/IR/Tensor.h>
+#include <mlir/Support/LogicalResult.h>
+#include <mlir/Tools/mlir-translate/Translation.h>
 
 using namespace mlir;
 using namespace mlir::qillr;
@@ -30,5 +35,9 @@ void mlir::qillr::registerQILLRToOpenQASMTranslation()
         [](DialectRegistry &registry) {
             registry.insert<qillr::QILLRDialect>();
             registry.insert<arith::ArithDialect>();
+            registry.insert<tensor::TensorDialect>();
+            registry.insert<scf::SCFDialect>();
+            registry.insert<qpu::QPUDialect>();
+            registry.insert<func::FuncDialect>();
         });
 }

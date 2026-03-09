@@ -15,4 +15,5 @@ add_mlir_dialect_library(QuantumIR
         QuantumTransforms
         MLIRArithDialect
         MLIRArithTransforms
+        QuantumInterfaces
 )

@@ -33,20 +33,6 @@ def ConvertQILLRToLLVM : Pass<"convert-qillr-to-llvm"> {
     ];
 }
 
-def ConvertQILLRToQuantum : Pass<"lift-qillr-to-quantum"> {
-    let summary = "Perform a dialect lifting from QILLR to Quantum";
-
-    let constructor = "mlir::createConvertQILLRToQuantumPass()";
-
-    let dependentDialects = [
-        "quantum::QuantumDialect",
-        "qillr::QILLRDialect",
-        "mlir::qqt::QQTDialect",
-        "mlir::tensor::TensorDialect",
-        "mlir::scf::SCFDialect"
-    ];
-}
-
 def ConvertScfToRVSDG : Pass<"convert-scf-to-rvsdg"> {
   let summary = "Transform `scf.if` and `scf.for` to RVSDG variants of the rvsdg dialect.";
 
@@ -62,5 +48,35 @@ def ConvertScfToRVSDG : Pass<"convert-scf-to-rvsdg"> {
     "rvsdg::RVSDGDialect"
   ];
 }
+
+def ConvertRVSDG : Pass<"convert-rvsdg"> {
+  let summary = "Transform rvsdg dialect operations and types.";
+
+  let description = [{
+    This pass transforms RVSDG dialect operations' types and operations.
+  }];
+
+  let constructor = "mlir::createConvertRVSDGPass()";
+
+  let dependentDialects = [
+    "rvsdg::RVSDGDialect"
+  ];
+}
+
+def ConvertRVSDGToScf : Pass<"convert-rvsdg-to-scf"> {
+  let summary = "Transform rvsdg dialect to scf.";
+
+  let description = [{
+    This pass transforms RVSDG dialect to scf.
+  }];
+
+  let constructor = "mlir::createConvertRVSDGToScfPass()";
+
+  let dependentDialects = [
+    "rvsdg::RVSDGDialect",
+    "scf::SCFDialect"
+  ];
+}
+
 
 #endif // QUANTUM_MLIR_CONVERSION_PASSES

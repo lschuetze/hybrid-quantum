@@ -5,32 +5,48 @@
 
 #include "quantum-mlir/Conversion/QuantumToQILLR/QuantumToQILLR.h"
 
-#include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/PatternMatch.h"
-#include "mlir/Pass/Pass.h"
-#include "mlir/Transforms/DialectConversion.h"
-#include "quantum-mlir/Dialect/QILLR/IR/QILLR.h"
+#include "quantum-mlir/Conversion/RVSDGConversion/RVSDGConversion.h"
 #include "quantum-mlir/Dialect/QILLR/IR/QILLROps.h"
 #include "quantum-mlir/Dialect/QILLR/IR/QILLRTypes.h"
-#include "quantum-mlir/Dialect/Quantum/IR/Quantum.h"
+#include "quantum-mlir/Dialect/Quantum/Analysis/RegisterRangesAnalysis.h"
 #include "quantum-mlir/Dialect/Quantum/IR/QuantumOps.h"
 #include "quantum-mlir/Dialect/Quantum/IR/QuantumTypes.h"
+#include "quantum-mlir/Dialect/Quantum/Interfaces/InferRegisterRangesInterface.h"
+#include "quantum-mlir/Dialect/RVSDG/IR/RVSDGOps.h"
 
-#include <llvm/ADT/ArrayRef.h>
+#include <cstddef>
+#include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/SmallVectorExtras.h>
 #include <llvm/Support/Casting.h>
+#include <llvm/Support/Debug.h>
+#include <llvm/Support/LogicalResult.h>
+#include <mlir/Analysis/DataFlow/ConstantPropagationAnalysis.h>
+#include <mlir/Analysis/DataFlow/DeadCodeAnalysis.h>
+#include <mlir/Analysis/DataFlow/SparseAnalysis.h>
 #include <mlir/Dialect/Func/IR/FuncOps.h>
+#include <mlir/Dialect/Func/Transforms/OneToNFuncConversions.h>
 #include <mlir/Dialect/Tensor/IR/Tensor.h>
+#include <mlir/IR/BuiltinAttributeInterfaces.h>
+#include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/BuiltinTypes.h>
-#include <mlir/IR/Types.h>
+#include <mlir/IR/IRMapping.h>
+#include <mlir/IR/PatternMatch.h>
 #include <mlir/IR/Value.h>
-#include <mlir/IR/ValueRange.h>
-#include <mlir/Support/LogicalResult.h>
+#include <mlir/Interfaces/InferIntRangeInterface.h>
+#include <mlir/Pass/Pass.h>
+#include <mlir/Transforms/DialectConversion.h>
+#include <utility>
+
+#define DEBUG_TYPE "quantum-qillr-conversion"
 
 using namespace mlir;
 using namespace mlir::quantum;
+using namespace quantum::dataflow;
 
-//===- Generated includes -------------------------------------------------===//
+//===- Generated includes
+//-------------------------------------------------===//
 
 namespace mlir {
 
@@ -50,108 +66,291 @@ struct ConvertQuantumToQILLRPass
     void runOnOperation() override;
 };
 
-struct ConvertAlloc : public OpConversionPattern<quantum::AllocOp> {
-    using OpConversionPattern::OpConversionPattern;
+template<typename OpT>
+struct IndexTrackingOpConversionPattern : public OpConversionPattern<OpT> {
+public:
+    IndexTrackingOpConversionPattern(
+        mlir::DataFlowSolver &solver,
+        IRMapping &cregs,
+        const TypeConverter &typeConverter,
+        MLIRContext* context,
+        PatternBenefit benefit = 1)
+            : OpConversionPattern<OpT>(typeConverter, context, benefit),
+              solver(solver),
+              cregs(cregs)
+    {}
+
+    LogicalResult lookupSingle(
+        Value value,
+        std::optional<uint64_t> &result,
+        ConversionPatternRewriter &rewriter) const;
+
+protected:
+    mlir::DataFlowSolver &solver;
+    IRMapping &cregs;
+
+}; // struct IndexTrackingOpConversionPattern
+
+template<typename OpT>
+LogicalResult IndexTrackingOpConversionPattern<OpT>::lookupSingle(
+    Value value,
+    std::optional<uint64_t> &result,
+    ConversionPatternRewriter &rewriter) const
+{
+    const RegisterRangesLattice* lattice =
+        this->solver.lookupState<RegisterRangesLattice>(value);
+    if (!lattice)
+        return rewriter.notifyMatchFailure(
+            value.getDefiningOp(),
+            "Lattice value not found");
+
+    const auto latticeValue = lattice->getValue();
+    const auto indices = latticeValue.getValue();
+
+    ConstantIntRanges range(indices[0].getRanges());
+    for (size_t i = 0; i < indices.size(); ++i) {
+        if (indices[i].getRegisterValue() != indices[0].getRegisterValue()) {
+            return rewriter.notifyMatchFailure(
+                value.getDefiningOp(),
+                "Lattice value depends on unequal register values");
+        }
+        range = range.rangeUnion(indices[i].getRanges());
+    }
+    bool isConstant = (range.umax() - 1 == range.umin());
+    if (isConstant) {
+        result = range.umin().trySExtValue();
+        return success();
+    }
+
+    if (auto valTy = llvm::dyn_cast<quantum::QubitType>(
+            indices[0].getRegisterValue().getType()))
+        if (valTy.getSize() == range.umax() - range.umin()) return success();
+    return failure();
+}
+
+struct ConvertAlloc
+        : public IndexTrackingOpConversionPattern<quantum::AllocOp> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
 
     LogicalResult matchAndRewrite(
         AllocOp op,
-        AllocOpAdaptor adaptor,
+        AllocOpAdaptor,
         ConversionPatternRewriter &rewriter) const override
     {
         auto opType = op.getResult().getType();
-        if (!opType.isSingleQubit())
-            return rewriter.notifyMatchFailure(
-                op,
-                "Please run --quantum-multi-qubit-legalize to transform "
-                "multi-qubit into single-qubits.");
+        auto size = opType.getSize();
+
+        LLVM_DEBUG(llvm::dbgs() << "Create alloc with size " << size << "\n");
 
         rewriter.replaceOpWithNewOp<qillr::AllocOp>(
             op,
-            qillr::QubitType::get(getContext()));
+            qillr::QubitType::get(getContext()),
+            size);
         return success();
     }
-}; // struct ConvertAllocOp
+}; // struct ConvertAlloc
 
-struct ConvertMeasure : public OpConversionPattern<quantum::MeasureOp> {
-    using OpConversionPattern::OpConversionPattern;
+struct ConvertSplit
+        : public IndexTrackingOpConversionPattern<quantum::SplitOp> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        SplitOp op,
+        SplitOpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        LLVM_DEBUG(llvm::dbgs() << "Convert op " << op << "\n");
+        SmallVector<ValueRange, 4> replace;
+        for (unsigned i = 0; i < op->getNumResults(); ++i) {
+            LLVM_DEBUG(
+                llvm::dbgs() << "Replace result " << i << "with "
+                             << adaptor.getInput() << "\n");
+            replace.push_back(adaptor.getInput());
+        }
+        rewriter.replaceOpWithMultiple(op, replace);
+        return success();
+    }
+}; // struct ConvertSplit
+
+struct ConvertMerge
+        : public IndexTrackingOpConversionPattern<quantum::MergeOp> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        MergeOp op,
+        MergeOpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        Value reg = adaptor.getInput()[0];
+        LLVM_DEBUG(llvm::dbgs() << "Replace result with " << reg << "\n");
+
+        for (size_t i = 0; i < adaptor.getInput().size(); ++i)
+            assert(
+                reg == adaptor.getInput()[i]
+                && "Must merge access to same register.");
+
+        rewriter.replaceOp(op, reg);
+        return success();
+    }
+}; // struct ConvertMerge
+
+struct ConvertMeasure
+        : public IndexTrackingOpConversionPattern<quantum::MeasureOp> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
+
+    LogicalResult rewriteToTensor(
+        MeasureOp op,
+        MeasureOpAdaptor adaptor,
+        quantum::ToTensorOp toTensorOp,
+        ConversionPatternRewriter &rewriter) const
+    {
+        TypedValue<RankedTensorType> creg = toTensorOp.getResult();
+
+        assert(creg.getType().getRank() == 1 && "Only support tensor<?x_>");
+        TypedValue<::mlir::qillr::ResultType> resultAlloc;
+        if (!cregs.contains(creg)) {
+            // We have not seen any tensor representing results yet
+            const int64_t length = creg.getType().getDimSize(0);
+            resultAlloc = rewriter
+                              .create<qillr::AllocResultOp>(
+                                  op->getLoc(),
+                                  qillr::ResultType::get(op.getContext()),
+                                  length)
+                              .getResult();
+        } else {
+            // Get the last stored tensor -> result mapping
+            resultAlloc =
+                llvm::dyn_cast_if_present<TypedValue<qillr::ResultType>>(
+                    cregs.lookupOrNull(creg));
+            // We do not need creg anymore.
+            cregs.erase(creg);
+        }
+        // Update the mapping to the newly created value.
+        cregs.map(creg, resultAlloc);
+
+        std::optional<uint64_t> qubitIndex;
+        auto result = this->lookupSingle(op.getInput(), qubitIndex, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<qillr::MeasureOp>(
+            op->getLoc(),
+            adaptor.getInput(),
+            resultAlloc,
+            qubitIndex,
+            0);
+
+        auto readMeasurement = rewriter.create<qillr::ReadMeasurementOp>(
+            op->getLoc(),
+            creg.getType(),
+            resultAlloc);
+
+        rewriter.replaceOp(toTensorOp, readMeasurement);
+        rewriter.replaceOp(op, {readMeasurement, adaptor.getInput()});
+
+        return success();
+    }
+
+    LogicalResult rewriteInsertSlice(
+        MeasureOp op,
+        MeasureOpAdaptor adaptor,
+        tensor::InsertSliceOp insertSliceOp,
+        quantum::ToTensorOp toTensorOp,
+        ConversionPatternRewriter &rewriter) const
+    {
+        auto creg = insertSliceOp.getDest();
+        assert(creg.getType().getRank() == 1 && "Only support tensor<?x_>");
+
+        TypedValue<::mlir::qillr::ResultType> resultAlloc;
+        if (!cregs.contains(creg)) {
+            // We have not seen any tensor representing results yet
+            const int64_t length = creg.getType().getDimSize(0);
+            resultAlloc = rewriter
+                              .create<qillr::AllocResultOp>(
+                                  op->getLoc(),
+                                  qillr::ResultType::get(op->getContext()),
+                                  length)
+                              .getResult();
+        } else {
+            // Get the last stored tensor -> result mapping
+            resultAlloc =
+                llvm::dyn_cast_if_present<TypedValue<qillr::ResultType>>(
+                    cregs.lookupOrNull(creg));
+            // We do not need creg anymore.
+            cregs.erase(creg);
+        }
+        // Update the mapping to the newly created value.
+        cregs.map(insertSliceOp.getResult(), resultAlloc);
+
+        std::optional<uint64_t> qubitIndex;
+        auto result = this->lookupSingle(op.getInput(), qubitIndex, rewriter);
+        if (failed(result)) return result;
+
+        int64_t staticOffset = insertSliceOp.getStaticOffset(0);
+        rewriter.create<qillr::MeasureOp>(
+            op->getLoc(),
+            adaptor.getInput(),
+            resultAlloc,
+            qubitIndex,
+            staticOffset);
+
+        auto readMeasurement = rewriter.create<qillr::ReadMeasurementOp>(
+            op->getLoc(),
+            creg.getType(),
+            resultAlloc);
+
+        rewriter.replaceOp(insertSliceOp, readMeasurement);
+        rewriter.replaceOp(op, {readMeasurement, adaptor.getInput()});
+        rewriter.eraseOp(toTensorOp);
+    }
 
     LogicalResult matchAndRewrite(
         MeasureOp op,
         MeasureOpAdaptor adaptor,
         ConversionPatternRewriter &rewriter) const override
     {
-        auto opType = op.getResult().getType();
-        if (!opType.isSingleQubit())
-            return rewriter.notifyMatchFailure(
-                op,
-                "Please run --quantum-multi-qubit-legalize to transform "
-                "multi-qubit into single-qubits.");
+        // The quantum measurement looks like follows:
+        // %c = ... tensor<jxi1> with j > i
+        // %m, %q1 = measure(%q) : qubit<1> -> measurement<1>, qubit<1>
+        // %t = to_tensor(%m) -> tensor<1xi1>
+        // if the dimension of %t and %c are equal insert_slice is omitted
+        // %cnew = insert_slice(%t, %c) {i} -> tensor<1xi1>
+        LLVM_DEBUG(llvm::dbgs() << "Lower measurement and results \n");
+        auto m = op.getMeasurement();
+        auto toTensorOp = llvm::filter_to_vector(
+            m.getUsers(),
+            [](Operation* op) { return llvm::isa<ToTensorOp>(op); });
+        assert(toTensorOp.size() == 1 && "Only one use implemented.");
+        auto insertSliceOpV = llvm::filter_to_vector(
+            toTensorOp.front()->getResult(0).getUsers(),
+            [](Operation* op) { return llvm::isa<tensor::InsertSliceOp>(op); });
 
-        auto loc = op.getLoc();
-
-        auto resultAlloc = rewriter.create<qillr::AllocResultOp>(
-            loc,
-            qillr::ResultType::get(op.getContext()));
-        rewriter.create<qillr::MeasureOp>(loc, adaptor.getInput(), resultAlloc);
-        auto readMeasurement = rewriter.create<qillr::ReadMeasurementOp>(
-            loc,
-            resultAlloc.getResult());
-
-        auto i1Type = rewriter.getI1Type();
-        auto genTensorType = mlir::RankedTensorType::get({1}, i1Type);
-        auto tensor = rewriter.create<tensor::FromElementsOp>(
-            loc,
-            genTensorType,
-            readMeasurement.getResult());
-
-        rewriter.replaceOpWithMultiple(
-            op,
-            {tensor.getResult(), adaptor.getInput()});
+        if (insertSliceOpV.size() == 0) {
+            if (failed(rewriteToTensor(
+                    op,
+                    adaptor,
+                    llvm::cast<quantum::ToTensorOp>(toTensorOp.front()),
+                    rewriter)))
+                return failure();
+        } else if (insertSliceOpV.size() == 1) {
+            if (failed(rewriteInsertSlice(
+                    op,
+                    adaptor,
+                    llvm::cast<tensor::InsertSliceOp>(insertSliceOpV.front()),
+                    llvm::cast<quantum::ToTensorOp>(toTensorOp.front()),
+                    rewriter)))
+                return failure();
+        } else {
+            LLVM_DEBUG(
+                llvm::dbgs() << "toTensorOp is used " << insertSliceOpV.size()
+                             << " times\n");
+            toTensorOp.front()->emitOpError("has unsupported many uses.");
+        }
         return success();
-    }
+    } // namespace
 }; // struct ConvertMeasure
 
-struct ConvertSingleMeasure
-        : public OpConversionPattern<quantum::MeasureSingleOp> {
-    using OpConversionPattern::OpConversionPattern;
-
-    LogicalResult matchAndRewrite(
-        MeasureSingleOp op,
-        MeasureSingleOpAdaptor adaptor,
-        ConversionPatternRewriter &rewriter) const override
-    {
-        auto loc = op.getLoc();
-
-        auto resultAlloc = rewriter.create<qillr::AllocResultOp>(
-            loc,
-            qillr::ResultType::get(op.getContext()));
-        rewriter.create<qillr::MeasureOp>(loc, adaptor.getInput(), resultAlloc);
-        auto readMeasurement = rewriter.create<qillr::ReadMeasurementOp>(
-            loc,
-            resultAlloc.getResult());
-
-        rewriter.replaceOp(
-            op,
-            {readMeasurement.getResult(), adaptor.getInput()});
-        return success();
-    }
-}; // struct ConvertSingleMeasure
-
-struct ConvertDealloc : public OpConversionPattern<quantum::DeallocateOp> {
-    using OpConversionPattern::OpConversionPattern;
-
-    LogicalResult matchAndRewrite(
-        DeallocateOp op,
-        DeallocateOpAdaptor adaptor,
-        ConversionPatternRewriter &rewriter) const override
-    {
-        rewriter.replaceOpWithNewOp<qillr::ResetOp>(op, adaptor.getInput());
-        return success();
-    }
-}; // struct ConvertDealloc
-
-struct ConvertFunc : public OpConversionPattern<func::FuncOp> {
-    using OpConversionPattern::OpConversionPattern;
+struct ConvertFunc : public IndexTrackingOpConversionPattern<func::FuncOp> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
 
     LogicalResult matchAndRewrite(
         func::FuncOp op,
@@ -179,89 +378,363 @@ struct ConvertFunc : public OpConversionPattern<func::FuncOp> {
 }; // struct ConvertFunc
 
 template<typename SourceOp, typename TargetOp>
-struct ConvertUnaryOp : public OpConversionPattern<SourceOp> {
-    using OpConversionPattern<SourceOp>::OpConversionPattern;
+struct ConvertUnaryOp : public IndexTrackingOpConversionPattern<SourceOp> {
+    using IndexTrackingOpConversionPattern<
+        SourceOp>::IndexTrackingOpConversionPattern;
 
     LogicalResult matchAndRewrite(
         SourceOp op,
         OpConversionPattern<SourceOp>::OpAdaptor adaptor,
         ConversionPatternRewriter &rewriter) const override
     {
-        rewriter.create<TargetOp>(op.getLoc(), adaptor.getInput());
-        rewriter.replaceOp(op, adaptor.getInput());
+        LLVM_DEBUG(llvm::dbgs() << "Convert " << op << "\n");
+        std::optional<uint64_t> index;
+        auto result = this->lookupSingle(op.getInput(), index, rewriter);
+        if (failed(result)) return result;
+        LLVM_DEBUG(llvm::dbgs() << "Inferred index " << index << "\n");
+
+        LLVM_DEBUG(
+            llvm::dbgs()
+            << "Create new op with argument: " << adaptor.getInput() << "\n");
+        rewriter.create<TargetOp>(op.getLoc(), adaptor.getInput(), index);
+        if (op->getNumResults() > 0)
+            rewriter.replaceOp(op, adaptor.getInput());
+        else
+            rewriter.eraseOp(op);
         return success();
     }
 }; // struct ConvertUnaryOp
 
 template<typename SourceOp, typename TargetOp>
-struct ConvertRotationOp : public OpConversionPattern<SourceOp> {
-    using OpConversionPattern<SourceOp>::OpConversionPattern;
+struct ConvertControlledUnaryOp
+        : public IndexTrackingOpConversionPattern<SourceOp> {
+    using IndexTrackingOpConversionPattern<
+        SourceOp>::IndexTrackingOpConversionPattern;
 
     LogicalResult matchAndRewrite(
         SourceOp op,
         OpConversionPattern<SourceOp>::OpAdaptor adaptor,
         ConversionPatternRewriter &rewriter) const override
     {
+        std::optional<uint64_t> controlIndex;
+        auto result =
+            this->lookupSingle(op.getControl(), controlIndex, rewriter);
+        if (failed(result)) return result;
+
+        std::optional<uint64_t> targetIndex;
+        result = this->lookupSingle(op.getTarget(), targetIndex, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<TargetOp>(
+            op.getLoc(),
+            adaptor.getControl(),
+            adaptor.getTarget(),
+            controlIndex,
+            targetIndex);
+
+        if (op->getNumResults() > 0)
+            rewriter.replaceOp(op, adaptor.getOperands());
+        else
+            rewriter.eraseOp(op);
+        return success();
+    }
+}; // struct ConvertControlledUnaryOp
+
+template<typename SourceOp, typename TargetOp>
+struct ConvertRotationOp : public IndexTrackingOpConversionPattern<SourceOp> {
+    using IndexTrackingOpConversionPattern<
+        SourceOp>::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        SourceOp op,
+        OpConversionPattern<SourceOp>::OpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        std::optional<uint64_t> index;
+        auto result = this->lookupSingle(op.getInput(), index, rewriter);
+        if (failed(result)) return result;
+
         rewriter.create<TargetOp>(
             op.getLoc(),
             adaptor.getInput(),
-            adaptor.getTheta());
+            adaptor.getTheta(),
+            index);
         rewriter.replaceOp(op, adaptor.getInput());
         return success();
     }
 }; // struct ConvertRotationOp
 
-struct ConvertSwap : public OpConversionPattern<quantum::SWAPOp> {
-    using OpConversionPattern::OpConversionPattern;
+template<typename SourceOp, typename TargetOp>
+struct ConvertControlledRotationOp
+        : public IndexTrackingOpConversionPattern<SourceOp> {
+    using IndexTrackingOpConversionPattern<
+        SourceOp>::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        SourceOp op,
+        OpConversionPattern<SourceOp>::OpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        std::optional<uint64_t> controlIndex;
+        auto result =
+            this->lookupSingle(op.getControl(), controlIndex, rewriter);
+        if (failed(result)) return result;
+
+        std::optional<uint64_t> targetIndex;
+        result = this->lookupSingle(op.getTarget(), targetIndex, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<TargetOp>(
+            op.getLoc(),
+            adaptor.getControl(),
+            adaptor.getTarget(),
+            adaptor.getAngle(),
+            controlIndex,
+            targetIndex);
+        rewriter.replaceOp(op, {adaptor.getControl(), adaptor.getTarget()});
+        return success();
+    }
+}; // struct ConvertControlledRotationOp
+
+struct ConvertSwap : public IndexTrackingOpConversionPattern<quantum::SWAPOp> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
 
     LogicalResult matchAndRewrite(
         SWAPOp op,
         SWAPOpAdaptor adaptor,
         ConversionPatternRewriter &rewriter) const override
     {
+        std::optional<uint64_t> indexLhs;
+        std::optional<uint64_t> indexRhs;
+        LogicalResult result = LogicalResult::success();
+        result = this->lookupSingle(op.getLhs(), indexLhs, rewriter);
+        if (failed(result)) return result;
+        result = this->lookupSingle(op.getRhs(), indexRhs, rewriter);
+        if (failed(result)) return result;
+
         // Retrieve the two input qubits from the adaptor.
         Value qubit1 = adaptor.getLhs();
         Value qubit2 = adaptor.getRhs();
-        rewriter.create<qillr::SwapOp>(op.getLoc(), qubit1, qubit2);
+        rewriter.create<qillr::SwapOp>(
+            op.getLoc(),
+            qubit1,
+            qubit2,
+            indexLhs,
+            indexRhs);
         rewriter.replaceOp(op, {qubit1, qubit2});
         return success();
     }
-};
+}; // struct ConvertSwap
 
-struct ConvertCSwap : public OpConversionPattern<quantum::CSWAPOp> {
-    using OpConversionPattern::OpConversionPattern;
+struct ConvertCSwap
+        : public IndexTrackingOpConversionPattern<quantum::CSWAPOp> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
 
     LogicalResult matchAndRewrite(
         CSWAPOp op,
         CSWAPOpAdaptor adaptor,
         ConversionPatternRewriter &rewriter) const override
     {
+        LogicalResult result = LogicalResult::success();
+        std::optional<uint64_t> indexCtrl;
+        std::optional<uint64_t> indexLhs;
+        std::optional<uint64_t> indexRhs;
+        result = this->lookupSingle(op.getLhs(), indexCtrl, rewriter);
+        if (failed(result)) return result;
+        result = this->lookupSingle(op.getLhs(), indexLhs, rewriter);
+        if (failed(result)) return result;
+        result = this->lookupSingle(op.getLhs(), indexRhs, rewriter);
+        if (failed(result)) return result;
+
         Value control = adaptor.getControl();
         Value lhs = adaptor.getLhs();
         Value rhs = adaptor.getRhs();
-        rewriter.create<qillr::CSwapOp>(op.getLoc(), control, lhs, rhs);
+        rewriter.create<qillr::CSwapOp>(
+            op.getLoc(),
+            control,
+            lhs,
+            rhs,
+            indexCtrl,
+            indexLhs,
+            indexRhs);
         rewriter.replaceOp(op, {control, lhs, rhs});
         return success();
     }
-};
+}; // struct ConvertCSwap
 
-struct ConvertCU1 : public OpConversionPattern<quantum::CU1Op> {
-    using OpConversionPattern::OpConversionPattern;
+struct ConvertBarrier
+        : public IndexTrackingOpConversionPattern<quantum::BarrierOp> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
 
     LogicalResult matchAndRewrite(
-        CU1Op op,
-        CU1OpAdaptor adaptor,
+        BarrierOp op,
+        BarrierOpAdaptor adaptor,
         ConversionPatternRewriter &rewriter) const override
     {
-        // Retrieve the two input qubits from the adaptor.
-        Value control = adaptor.getControl();
-        Value target = adaptor.getTarget();
-        Value angle = adaptor.getAngle();
-        rewriter.create<qillr::CU1Op>(op.getLoc(), control, target, angle);
-        rewriter.replaceOp(op, {control, target});
+        llvm::SmallVector<int64_t> indices;
+        LogicalResult result = LogicalResult::success();
+        for (auto input : op.getInput()) {
+            std::optional<uint64_t> index;
+            result = this->lookupSingle(input, index, rewriter);
+            if (failed(result)) return result;
+            indices.push_back(index.value());
+        }
+
+        auto attr = rewriter.getI64ArrayAttr(indices);
+        rewriter.create<qillr::BarrierOp>(
+            op->getLoc(),
+            adaptor.getInput(),
+            attr);
+
+        rewriter.replaceOp(op, adaptor.getInput());
         return success();
     }
-};
+}; // struct ConvertBarrier
+
+struct ConvertCNOT : public IndexTrackingOpConversionPattern<quantum::CNOTOp> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        CNOTOp op,
+        CNOTOpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        LogicalResult result = LogicalResult::success();
+        std::optional<uint64_t> controlIndex;
+        result = this->lookupSingle(op.getInput(), controlIndex, rewriter);
+        if (failed(result)) return result;
+
+        std::optional<uint64_t> targetIndex;
+        result = this->lookupSingle(op.getTarget(), targetIndex, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<qillr::CNOTOp>(
+            op->getLoc(),
+            adaptor.getInput(),
+            adaptor.getTarget(),
+            controlIndex,
+            targetIndex);
+
+        rewriter.replaceOp(op, {adaptor.getInput(), adaptor.getTarget()});
+        return success();
+    }
+}; // struct ConvertCNOT
+
+struct ConvertU1 : public IndexTrackingOpConversionPattern<quantum::U1Op> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        U1Op op,
+        U1OpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        LogicalResult result = LogicalResult::success();
+        std::optional<uint64_t> index;
+        result = this->lookupSingle(op.getInput(), index, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<qillr::U1Op>(
+            op->getLoc(),
+            adaptor.getInput(),
+            adaptor.getLambda(),
+            index);
+
+        rewriter.replaceOp(op, adaptor.getInput());
+        return success();
+    }
+}; // struct ConvertU1
+
+struct ConvertU2 : public IndexTrackingOpConversionPattern<quantum::U2Op> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        U2Op op,
+        U2OpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        LogicalResult result = LogicalResult::success();
+        std::optional<uint64_t> index;
+        result = this->lookupSingle(op.getInput(), index, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<qillr::U2Op>(
+            op->getLoc(),
+            adaptor.getInput(),
+            adaptor.getPhi(),
+            adaptor.getLambda(),
+            index);
+
+        rewriter.replaceOp(op, adaptor.getInput());
+        return success();
+    }
+}; // struct ConvertU2
+
+struct ConvertU3 : public IndexTrackingOpConversionPattern<quantum::U3Op> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        U3Op op,
+        U3OpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        LogicalResult result = LogicalResult::success();
+        std::optional<uint64_t> index;
+        result = this->lookupSingle(op.getInput(), index, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<qillr::U3Op>(
+            op->getLoc(),
+            adaptor.getInput(),
+            adaptor.getTheta(),
+            adaptor.getPhi(),
+            adaptor.getLambda(),
+            index);
+
+        rewriter.replaceOp(op, adaptor.getInput());
+        return success();
+    }
+}; // struct ConvertU3
+
+struct ConvertToffoli
+        : public IndexTrackingOpConversionPattern<quantum::CCXOp> {
+    using IndexTrackingOpConversionPattern::IndexTrackingOpConversionPattern;
+
+    LogicalResult matchAndRewrite(
+        CCXOp op,
+        CCXOpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        LogicalResult result = LogicalResult::success();
+
+        std::optional<uint64_t> control1Index;
+        result = this->lookupSingle(op.getControl1(), control1Index, rewriter);
+        if (failed(result)) return result;
+
+        std::optional<uint64_t> control2Index;
+        result = this->lookupSingle(op.getControl2(), control2Index, rewriter);
+        if (failed(result)) return result;
+
+        std::optional<uint64_t> targetIndex;
+        result = this->lookupSingle(op.getTarget(), targetIndex, rewriter);
+        if (failed(result)) return result;
+
+        rewriter.create<qillr::CCXOp>(
+            op->getLoc(),
+            adaptor.getControl1(),
+            adaptor.getControl2(),
+            adaptor.getTarget(),
+            control1Index,
+            control2Index,
+            targetIndex);
+
+        rewriter.replaceOp(
+            op,
+            {adaptor.getControl1(),
+             adaptor.getControl2(),
+             adaptor.getTarget()});
+        return success();
+    }
+}; // struct ConvertToffoli
 
 } // namespace
 
@@ -271,30 +744,38 @@ void ConvertQuantumToQILLRPass::runOnOperation()
     auto context = &getContext();
     ConversionTarget target(*context);
     RewritePatternSet patterns(context);
+    IRMapping mapping;
 
     typeConverter.addConversion([](Type ty) { return ty; });
     typeConverter.addConversion([](quantum::QubitType ty) {
         return qillr::QubitType::get(ty.getContext());
     });
-    typeConverter.addConversion([&](FunctionType fty) {
-        llvm::SmallVector<Type> argTypes, resTypes;
 
-        for (auto ins : fty.getInputs())
-            argTypes.push_back(typeConverter.convertType(ins));
+    mlir::DataFlowSolver solver;
+    solver.load<mlir::dataflow::DeadCodeAnalysis>();
+    solver.load<mlir::dataflow::SparseConstantPropagation>();
+    solver.load<quantum::dataflow::RegisterRangesAnalysis>();
+    if (failed(solver.initializeAndRun(getOperation())))
+        return signalPassFailure();
 
-        for (auto res : fty.getResults())
-            resTypes.push_back(typeConverter.convertType(res));
-
-        return FunctionType::get(fty.getContext(), argTypes, resTypes);
-    });
-
-    quantum::populateConvertQuantumToQILLRPatterns(typeConverter, patterns);
+    quantum::populateConvertQuantumToQILLRPatterns(
+        solver,
+        mapping,
+        typeConverter,
+        patterns);
+    populateFuncTypeConversionPatterns(typeConverter, patterns);
+    rvsdg::populateConvertRVSDGPatterns(typeConverter, patterns);
 
     target.addIllegalDialect<quantum::QuantumDialect>();
     target.addLegalDialect<tensor::TensorDialect>();
     target.addLegalDialect<qillr::QILLRDialect>();
     target.addDynamicallyLegalOp<func::FuncOp>([&](func::FuncOp op) {
-        return typeConverter.isLegal(op.getFunctionType());
+        return typeConverter.isSignatureLegal(op.getFunctionType());
+    });
+    target.addDynamicallyLegalOp<rvsdg::GammaNode>(
+        [&](rvsdg::GammaNode op) { return typeConverter.isLegal(op); });
+    target.addDynamicallyLegalOp<rvsdg::YieldOp>([&](rvsdg::YieldOp op) {
+        return typeConverter.isLegal(op->getOperandTypes());
     });
 
     if (failed(applyPartialConversion(
@@ -305,23 +786,49 @@ void ConvertQuantumToQILLRPass::runOnOperation()
 }
 
 void mlir::quantum::populateConvertQuantumToQILLRPatterns(
+    mlir::DataFlowSolver &solver,
+    IRMapping &mapping,
     TypeConverter &typeConverter,
     RewritePatternSet &patterns)
 {
     patterns.add<
         ConvertAlloc,
         ConvertMeasure,
-        ConvertSingleMeasure,
+        ConvertUnaryOp<quantum::ResetOp, qillr::ResetOp>,
+        ConvertUnaryOp<quantum::DeallocateOp, qillr::DeallocateOp>,
         ConvertUnaryOp<quantum::HOp, qillr::HOp>,
         ConvertUnaryOp<quantum::XOp, qillr::XOp>,
+        ConvertUnaryOp<quantum::YOp, qillr::YOp>,
+        ConvertUnaryOp<quantum::ZOp, qillr::ZOp>,
         ConvertUnaryOp<quantum::IdOp, qillr::IdOp>,
         ConvertUnaryOp<quantum::SXOp, qillr::SXOp>,
+        ConvertUnaryOp<quantum::SdgOp, qillr::SdgOp>,
+        ConvertUnaryOp<quantum::TOp, qillr::TOp>,
+        ConvertUnaryOp<quantum::TdgOp, qillr::TdgOp>,
+        ConvertUnaryOp<quantum::SOp, qillr::SOp>,
+        ConvertRotationOp<quantum::RxOp, qillr::RxOp>,
+        ConvertRotationOp<quantum::RyOp, qillr::RyOp>,
         ConvertRotationOp<quantum::RzOp, qillr::RzOp>,
         ConvertRotationOp<quantum::PhaseOp, qillr::PhaseOp>,
+        ConvertControlledUnaryOp<quantum::CZOp, qillr::CZOp>,
+        ConvertControlledRotationOp<quantum::CRyOp, qillr::CRyOp>,
+        ConvertControlledRotationOp<quantum::CRzOp, qillr::CRzOp>,
+        ConvertControlledRotationOp<quantum::CU1Op, qillr::CU1Op>,
         ConvertCSwap,
-        ConvertFunc,
         ConvertSwap,
-        ConvertDealloc>(typeConverter, patterns.getContext(), /* benefit*/ 1);
+        ConvertSplit,
+        ConvertMerge,
+        ConvertBarrier,
+        ConvertCNOT,
+        ConvertU1,
+        ConvertU2,
+        ConvertU3,
+        ConvertToffoli>(
+        solver,
+        mapping,
+        typeConverter,
+        patterns.getContext(),
+        /* benefit*/ 1);
 }
 
 std::unique_ptr<Pass> mlir::createConvertQuantumToQILLRPass()

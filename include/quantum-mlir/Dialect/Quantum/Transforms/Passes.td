@@ -27,19 +27,4 @@ def HermitianCancel : Pass<"hermitian-cancel", "ModuleOp"> {
   let constructor = "mlir::quantum::createHermitianCancelPass()";
 }
 
-def MultiQubitLegalization : Pass<"quantum-multi-qubit-legalize", "ModuleOp"> {
-  let summary = "Legalize multi-qubit registers in the `quantum` dialect";
-
-  let description = [{
-  This pass legalizes multi-qubit quantum registers in the quantum dialect
-  such that they can be amenable to further lowerings.
-  }];
-
-  let constructor = "mlir::quantum::createMultiQubitLegalizationPass()";
-
-  let dependentDialects = [
-    "tensor::TensorDialect"
-  ];
-}
-
 #endif // QUANTUM_PASSES

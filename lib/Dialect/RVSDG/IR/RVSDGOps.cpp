@@ -27,6 +27,7 @@
 #include <mlir/IR/PatternMatch.h>
 #include <mlir/IR/Region.h>
 #include <mlir/IR/Value.h>
+#include <mlir/Interfaces/ControlFlowInterfaces.h>
 #include <mlir/Support/LLVM.h>
 #include <mlir/Support/LogicalResult.h>
 #include <optional>
@@ -168,6 +169,45 @@ static void printTypedParamList(
 //===----------------------------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//
+// GammaOp
+//===----------------------------------------------------------------------===//
+
+void GammaNode::getSuccessorRegions(
+    RegionBranchPoint point,
+    SmallVectorImpl<RegionSuccessor> &regions)
+{
+    // The regions branch back to the parent operation.
+    if (!point.isParent()) {
+        regions.push_back(RegionSuccessor(getResults()));
+        return;
+    }
+
+    for (auto &region : getRegions())
+        regions.push_back(RegionSuccessor(&region, region.getArguments()));
+}
+
+void GammaNode::getEntrySuccessorRegions(
+    ArrayRef<Attribute> operands,
+    SmallVectorImpl<RegionSuccessor> &regions)
+{
+    for (auto &region : getRegions())
+        regions.push_back(RegionSuccessor(&region, region.getArguments()));
+}
+
+void GammaNode::getRegionInvocationBounds(
+    ArrayRef<Attribute> operands,
+    SmallVectorImpl<InvocationBounds> &invocationBounds)
+{
+    // Each region may be executed 0 or 1 times.
+    invocationBounds.assign(getNumRegions(), {0, 1});
+}
+
+OperandRange GammaNode::getEntrySuccessorOperands(RegionBranchPoint point)
+{
+    return getOperands().drop_front();
+}
+
+//===----------------------------------------------------------------------===//
 // Verifier
 //===----------------------------------------------------------------------===//
 
@@ -249,7 +289,8 @@ LogicalResult MatchOp::verify()
             if (matchRuleAttr.isDefault()) {
                 if (hasSingleDefault) {
                     return emitOpError(
-                        "Match operator has more than one default rule in its "
+                        "Match operator has more than one default rule in "
+                        "its "
                         "mapping attribute.");
                 } else {
                     hasSingleDefault = true;
@@ -271,7 +312,8 @@ LogicalResult MatchOp::verify()
             auto matchResult = matchRuleAttr.getIndex();
             if (matchResult >= numOptions) {
                 return emitOpError(
-                           " has a result index that is out of bounds in its "
+                           " has a result index that is out of bounds in "
+                           "its "
                            "mapping attribute.")
                        << " Result index: " << matchResult
                        << " Number of options: " << numOptions;

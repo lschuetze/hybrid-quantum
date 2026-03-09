@@ -981,6 +981,41 @@ struct ResetOpPattern : public ConvertOpToLLVMPattern<ResetOp> {
     }
 };
 
+struct DeallocateOpPattern : public ConvertOpToLLVMPattern<DeallocateOp> {
+    using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+    LogicalResult matchAndRewrite(
+        DeallocateOp op,
+        DeallocateOpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const override
+    {
+        MLIRContext* ctx = getContext();
+
+        Type ptrType = LLVM::LLVMPointerType::get(ctx);
+        Type voidType = LLVM::LLVMVoidType::get(ctx);
+
+        // Declare __quantum__rt__qubit_release function: (ptr) -> void.
+        StringRef qirResetFnName = "__quantum__rt__qubit_release";
+        Type resetFnType =
+            LLVM::LLVMFunctionType::get(voidType, {ptrType}, false);
+        LLVM::LLVMFuncOp resetFnDecl = ensureFunctionDeclaration(
+            rewriter,
+            op,
+            qirResetFnName,
+            resetFnType);
+
+        Value qubit = adaptor.getInput();
+
+        rewriter.replaceOpWithNewOp<LLVM::CallOp>(
+            op,
+            TypeRange{},
+            resetFnDecl.getSymName(),
+            ValueRange{qubit});
+
+        return success();
+    }
+};
+
 } // namespace
 
 void ConvertQILLRToLLVMPass::runOnOperation()
@@ -1053,7 +1088,8 @@ void mlir::qillr::populateConvertQILLRToLLVMPatterns(
         BarrierOpPattern,
         MeasureOpPattern,
         ReadMeasurementOpPattern,
-        ResetOpPattern>(typeConverter);
+        ResetOpPattern,
+        DeallocateOpPattern>(typeConverter);
 
     patterns.add<COpPattern<CNOTOp>>(
         typeConverter,

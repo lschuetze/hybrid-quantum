@@ -2,13 +2,13 @@
 
 func.func @main() {
   // Allocate qubits and results.
-  %q0 = "qillr.alloc" () : () -> (!qillr.qubit)
+  %q0 = "qillr.alloc" () <{size = 1 : i64}> : () -> (!qillr.qubit)
 // CHECK-DAG: %[[Q0:.+]] = "qillr.alloc"()
 
-  %q1 = "qillr.alloc" () : () -> (!qillr.qubit)
+  %q1 = "qillr.alloc" () <{size = 1 : i64}> : () -> (!qillr.qubit)
 // CHECK-DAG: %[[Q1:.+]] = "qillr.alloc"()
 
-  %q2 = "qillr.alloc" () : () -> (!qillr.qubit)
+  %q2 = "qillr.alloc" () <{size = 1 : i64}> : () -> (!qillr.qubit)
 // CHECK-DAG: %[[Q2:.+]] = "qillr.alloc"()
 
   %r0 = "qillr.ralloc" () : () -> (!qillr.result)

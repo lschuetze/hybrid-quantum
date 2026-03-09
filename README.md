@@ -36,14 +36,14 @@ You have to set `MLIR_ENABLE_BINDINGS_PYTHON` to build [MLIR Python bindings](ht
 
 ```sh
 # Setup the virtual environment for the MLIR Python bindings dependencies
-python3 -m venv .venv
+uv venv .venv --seed -p 3.12
 source .venv/bin/activate
 
 # It is recommended to upgrade pip:
 python3 -m pip install --upgrade pip
 
 # Install the Python bindings requirements
-python3 -m pip install -r $LLVM_PREFIX/mlir/python/requirements.txt
+uv pip install -r $LLVM_PREFIX/mlir/python/requirements.txt
 
 # Configure LLVM
 cmake -S $LLVM_PREFIX/llvm -B $LLVM_PREFIX/build \
@@ -57,6 +57,7 @@ cmake -S $LLVM_PREFIX/llvm -B $LLVM_PREFIX/build \
    -DMLIR_ENABLE_EXECUTION_ENGINE=ON \
    -DLLVM_BUILD_TOOLS=ON \
    -DBUILD_SHARED_LIBS=ON \
+   -DMLIR_BUILD_MLIR_C_DYLIB=ON \
    -DLLVM_OPTIMIZED_TABLEGEN=ON
 
 # Build LLVM
@@ -66,7 +67,7 @@ ninja -C $LLVM_PREFIX/build
 We provide a [Qiskit](https://www.ibm.com/quantum/ecosystem) `OpenQASM` frontend tested with Qiskit version `2.0.0`.
 To use the frontend You can install the dependency to your virtual environment
 ```sh
-python3 -m pip install -r ./frontend/qasm/requirements.txt
+uv pip install -r ./frontend/requirements.txt
 ```
 
 As a backend it supports [QIR Runner](https://github.com/qir-alliance/qir-runner) in version `0.7.6`.
@@ -83,7 +84,7 @@ The `hybrid-quantum` project is built using CMAKE (version 3.22 or newer).
 ```sh
 
 # Install the frontend dependencies to the virtual environment
-python3 -m pip install -r frontend/requirements.txt
+uv pip install -r frontend/requirements.txt
 
 # Configure
 cmake -S . -B build \
@@ -100,7 +101,7 @@ cmake -S . -B build \
 ninja -C build
 
 # Add the generated `python_packages` to the virtual environment
-echo $PWD/build/python_packages/quantum-mlir > $(python3 -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())")/qillr-python-bindings.pth
+echo $PWD/build/python_packages/quantum > $(python3 -c "import sysconfig; print(sysconfig.get_path('purelib'))")/quantum-python-bindings.pth
 
 # Tests
 # MLIR dialect tests

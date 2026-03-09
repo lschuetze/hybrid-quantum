@@ -30,3 +30,17 @@ MlirType mlirQuantumQubitTypeGet(MlirContext ctx, int64_t length)
 {
     return wrap(QubitType::get(unwrap(ctx), length));
 }
+
+//===---------------------------------------------------------------------===//
+// MeasurementType
+//===---------------------------------------------------------------------===//
+
+bool mlirTypeIsAQuantumMeasurementType(MlirType type)
+{
+    return isa<MeasurementType>(unwrap(type));
+}
+
+MlirType mlirQuantumMeasurementTypeGet(MlirContext ctx, int64_t length)
+{
+    return wrap(MeasurementType::get(unwrap(ctx), length));
+}

@@ -11,11 +11,11 @@ import re
 from enum import Enum
 from functools import reduce
 
-from mlir._mlir_libs._mlirDialectsQILLR import QubitType
-from mlir._mlir_libs._mlirDialectsQILLR import qillr as qillrdialect
-from mlir.dialects import arith, func, qillr, scf, tensor
-from mlir.dialects.builtin import Block, IntegerType, RankedTensorType
-from mlir.ir import Context, F64Type, InsertionPoint, Location, Module, StringAttr, TypeAttr, Value
+from mlir_quantum._mlir_libs._mlirDialectsQILLR import QubitType
+from mlir_quantum._mlir_libs._mlirDialectsQILLR import qillr as qillrdialect
+from mlir_quantum.dialects import arith, func, qillr, scf, tensor
+from mlir_quantum.dialects.builtin import Block, IntegerType, RankedTensorType
+from mlir_quantum.ir import Context, F64Type, InsertionPoint, Location, Module, StringAttr, TypeAttr, Value
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
 from qiskit.circuit import Clbit, Instruction, Operation, ParameterExpression, Qubit
 from qiskit.circuit import library as lib

@@ -9,12 +9,15 @@
 #include "mlir/Transforms/InliningUtils.h"
 #include "quantum-mlir/Dialect/Quantum/IR/QuantumAttributes.h"
 #include "quantum-mlir/Dialect/Quantum/IR/QuantumTypes.h"
+#include "quantum-mlir/Dialect/Quantum/Interfaces/InferRegisterRangesInterface.h"
 
 #include <algorithm>
 #include <cstddef>
 #include <iterator>
+#include <llvm/ADT/APInt.h>
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/SmallVectorExtras.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/Error.h>
@@ -24,10 +27,12 @@
 #include <llvm/TableGen/Record.h>
 #include <mlir/Dialect/Arith/IR/Arith.h>
 #include <mlir/IR/Diagnostics.h>
+#include <mlir/IR/Matchers.h>
 #include <mlir/IR/OpDefinition.h>
 #include <mlir/IR/PatternMatch.h>
 #include <mlir/IR/Region.h>
 #include <mlir/IR/Value.h>
+#include <mlir/Interfaces/InferIntRangeInterface.h>
 #include <mlir/Support/LLVM.h>
 #include <mlir/Support/LogicalResult.h>
 #include <optional>
@@ -58,10 +63,7 @@ struct QuantumInlinerInterface : public DialectInlinerInterface {
     //===--------------------------------------------------------------------===//
 
     /// Call operations can always be inlined
-    bool isLegalToInline(
-        Operation* call,
-        Operation* callable,
-        bool wouldBeCloned) const final
+    bool isLegalToInline(Operation*, Operation*, bool) const final
     {
         return true;
     }
@@ -82,9 +84,9 @@ struct QuantumInlinerInterface : public DialectInlinerInterface {
     // Transformation Hooks
     //===--------------------------------------------------------------------===//
 
-    /// Handle the given inlined terminator by replacing it with a new operation
-    /// as necessary.
-    void handleTerminator(Operation* op, Block* newDest) const final
+    /// Handle the given inlined terminator by replacing it with a new
+    /// operation as necessary.
+    void handleTerminator(Operation* op, Block*) const final
     {
         auto returnOp = llvm::dyn_cast<quantum::ReturnOp>(op);
         if (!returnOp) return;
@@ -106,6 +108,62 @@ struct QuantumInlinerInterface : public DialectInlinerInterface {
     };
 };
 } // namespace
+
+//===--------------------------------------------------------------------===//
+// InterRegisterRangesInterface Hooks
+//===--------------------------------------------------------------------===//
+
+void AllocOp::inferResultRanges(
+    ArrayRef<RegisterRanges>,
+    SetRangeFn setResultRanges)
+{
+    auto zero = llvm::APInt(64, 0);
+    auto size = llvm::APInt(64, getResult().getType().getSize());
+    ConstantIntRanges range(zero, size, zero, size);
+    setResultRanges(
+        getResult(),
+        RegisterRanges(ConstantRegisterRanges(getResult(), range)));
+}
+
+void DeallocateOp::inferResultRanges(ArrayRef<RegisterRanges>, SetRangeFn)
+{
+    return;
+}
+
+void SplitOp::inferResultRanges(
+    ArrayRef<RegisterRanges> argRanges,
+    SetRangeFn setResultRanges)
+{
+    // Split op takes an input and returns multiple outputs each holding a
+    // subintervals
+    assert(argRanges.size() == 1 && "Only expect a single input to split");
+    RegisterRanges splitRange = argRanges[0];
+    for (auto result : getResults()) {
+        auto ty = llvm::dyn_cast_if_present<QubitType>(result.getType());
+        if (!ty) continue;
+        auto resRange = splitRange.take_front(ty.getSize());
+        splitRange = splitRange.drop_front(ty.getSize());
+        setResultRanges(result, resRange);
+    }
+}
+
+void MergeOp::inferResultRanges(
+    ArrayRef<RegisterRanges> argRanges,
+    SetRangeFn setResultRanges)
+{
+    RegisterRanges result;
+    for (RegisterRanges arg : argRanges)
+        result = RegisterRanges::join(result, arg);
+
+    setResultRanges(getResult(), result);
+}
+
+void MeasureOp::inferResultRanges(
+    ArrayRef<RegisterRanges> argRanges,
+    SetRangeFn setResultRanges)
+{
+    setResultRanges(getResult(), argRanges[0]);
+}
 
 //===----------------------------------------------------------------------===//
 // Canonicalization
@@ -186,11 +244,85 @@ LogicalResult RyOp::canonicalize(RyOp op, PatternRewriter &rewriter)
 }
 
 //===----------------------------------------------------------------------===//
+// Folders
+//===----------------------------------------------------------------------===//
+
+// Free function implementation of foldTrait
+template<typename ConcreteType>
+LogicalResult foldHermitianTraitImpl(
+    Operation* op,
+    ArrayRef<Attribute> operands,
+    SmallVectorImpl<OpFoldResult> &results)
+{
+    if (op->getNumOperands() == 1) {
+        // Check for H * H
+        if (matchPattern(op->getOperand(0), m_Op<ConcreteType>())) {
+            // Add the other's operand to the results vector
+            auto otherOp = op->getOperand(0).getDefiningOp();
+            results.push_back(otherOp->getOperand(0));
+            return success();
+        }
+    } else if (
+        // x, z = CNOT(a, b); CNOT(x, z); := a, b
+        matchPattern(op->getOperand(0), m_Op<ConcreteType>())
+        && matchPattern(op->getOperand(1), m_Op<ConcreteType>())) {
+        if (op->getOperand(0).getDefiningOp()
+            == op->getOperand(1).getDefiningOp()) {
+            // Add the other's operands to the results vector
+            auto otherOp = op->getOperand(0).getDefiningOp();
+            results.push_back(otherOp->getOperand(0));
+            results.push_back(otherOp->getOperand(1));
+            return success();
+        }
+    }
+    return failure();
+}
+
+/// Override the 'foldTrait' hook to support trait based folding on the
+/// concrete operation.
+template<typename ConcreteType>
+LogicalResult Hermitian<ConcreteType>::foldTrait(
+    Operation* op,
+    ArrayRef<Attribute> operands,
+    SmallVectorImpl<OpFoldResult> &results)
+{
+    return foldHermitianTraitImpl<ConcreteType>(op, operands, results);
+}
+
+//===----------------------------------------------------------------------===//
 // Verifier
 //===----------------------------------------------------------------------===//
 
-// NOTE: We assume N qubit device that may or may not have passive qubits. The
-// required qubits is thus the max qubit index regardless of topology.
+LogicalResult MergeOp::verify()
+{
+    int64_t size = 0;
+    for (auto operand : getOperands()) {
+        auto in = llvm::cast<QubitType>(operand.getType());
+        size += in.getSize();
+    }
+    if (getResult().getType().getSize() != size)
+        return emitOpError(
+            "result size must be equal to sum of operand sizes.");
+
+    return success();
+}
+
+LogicalResult SplitOp::verify()
+{
+    int64_t size = 0;
+    for (auto result : getResults()) {
+        auto out = llvm::cast<QubitType>(result.getType());
+        size += out.getSize();
+    }
+    if (getInput().getType().getSize() != size)
+        return emitOpError(
+            "operand size must be equal to sum of result sizes.");
+
+    return success();
+}
+
+// NOTE: We assume N qubit device that may or may not have passive qubits.
+// The required qubits is thus the max qubit index regardless of topology.
 // LogicalResult DeviceOp::verify()
 // {
 //     int64_t num_qubits = getQubits();
@@ -208,7 +340,8 @@ LogicalResult RyOp::canonicalize(RyOp op, PatternRewriter &rewriter)
 //         for (Attribute qubit : edgeArray) {
 //             IntegerAttr qubitAttr = dyn_cast<IntegerAttr>(qubit);
 //             if (!qubitAttr)
-//                 return emitOpError("each qubit in edge must be an integer");
+//                 return emitOpError("each qubit in edge must be an
+//                 integer");
 //             int64_t q = qubitAttr.getInt();
 //             if (q < 0 || q >= num_qubits)
 //                 return emitOpError(
@@ -248,16 +381,6 @@ LogicalResult NoClone<ConcreteType>::verifyTrait(Operation* op)
                    << " used more than once within the same block";
         }
     }
-
-    return success();
-}
-
-template<typename ConcreteType>
-LogicalResult Hermitian<ConcreteType>::verifyTrait(Operation* op)
-{
-    if (op->getNumOperands() != op->getNumResults())
-        return op->emitOpError(
-            "must have the same number of operands and results");
 
     return success();
 }

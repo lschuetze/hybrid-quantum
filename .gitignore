@@ -246,3 +246,8 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,cmake,c++,python
 
 __pycache__
+
+# Allow codegen for target languages
+!test/Target
+!lib/Target
+!include/quantum-mlir/Target

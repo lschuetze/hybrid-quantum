@@ -79,7 +79,13 @@ def RVSDG_MatchOp: RVSDG_Op<"match", [Pure]> {
 //===----------------------------------------------------------------------===//
 // Gamma Node (if, switch)
 //===----------------------------------------------------------------------===//
-def RVSDG_GammaNode: RVSDG_StructuralNode<"gamma"> {
+def RVSDG_GammaNode: RVSDG_StructuralNode<"gamma", [
+    DeclareOpInterfaceMethods<RegionBranchOpInterface, [
+        "getNumRegionInvocations",
+        "getRegionInvocationBounds",
+        "getEntrySuccessorRegions",
+        "getEntrySuccessorOperands"]>
+    ]> {
     let summary = "RVSDG gamma node which models conditional execution";
     let description = [{
         RVSDG gamma node. Models conditional execution such as if and switch statements.
@@ -107,7 +113,9 @@ def RVSDG_GammaNode: RVSDG_StructuralNode<"gamma"> {
 
 def RVSDG_YieldOp: RVSDG_Op<"yield", [
         HasParent<"mlir::rvsdg::GammaNode">,
-        Terminator
+        Terminator,
+        Pure,
+        ReturnLike
     ]> {
     let summary = "Gamma node results";
     let description = [{

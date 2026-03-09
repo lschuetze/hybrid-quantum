@@ -6,6 +6,10 @@
 
 project(check-quantum-mlir)
 
+llvm_canonicalize_cmake_booleans(
+        MLIR_ENABLE_BINDINGS_PYTHON
+)
+
 if(BACKEND_QIR)
     # Explicitly set the variable for substitution
     set(QIR_SHLIBS "${QIR_DIR}/libqir_backend${CMAKE_SHARED_LIBRARY_SUFFIX},${QIR_DIR}/libqir_stdlib${CMAKE_SHARED_LIBRARY_SUFFIX}" CACHE STRING "Libraries required by cpu-runner to load QIR")
@@ -30,7 +34,12 @@ set(TEST_DEPENDS
     MLIRCAPIQILLR
     MLIRCAPIRVSDG
     MLIRCAPIQUANTUM
+    MLIRCAPIQPU
 )
+
+if(MLIR_ENABLE_BINDINGS_PYTHON)
+  list(APPEND TEST_DEPENDS QuantumPythonModules)
+endif()
 
 # Create the test suite.
 add_lit_testsuite(${PROJECT_NAME}
@@ -39,8 +48,8 @@ add_lit_testsuite(${PROJECT_NAME}
     DEPENDS
         ${TEST_DEPENDS}
 )
-add_lit_testsuites(QUANTUMMLIR
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    DEPENDS
-        ${TEST_DEPENDS}
-)
+# add_lit_testsuites(QUANTUMMLIR
+#     ${CMAKE_CURRENT_SOURCE_DIR}
+#     DEPENDS
+#         ${TEST_DEPENDS}
+# )

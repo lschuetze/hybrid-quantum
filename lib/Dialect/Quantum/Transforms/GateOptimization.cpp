@@ -43,7 +43,7 @@ struct DropPhaseBeforeMeasure : OpRewritePattern<PhaseOp> {
     matchAndRewrite(PhaseOp op, PatternRewriter &rewriter) const override
     {
         auto userOp = *op.getResult().getUsers().begin();
-        if (dyn_cast<MeasureOp>(userOp) || dyn_cast<MeasureSingleOp>(userOp)) {
+        if (dyn_cast<MeasureOp>(userOp)) {
             rewriter.replaceOp(op, op.getOperand());
             return success();
         }

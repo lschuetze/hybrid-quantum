@@ -16,8 +16,8 @@ def QILLR_QubitType : QILLR_Type<"Qubit"> {
 }
 
 def QILLR_ResultType : QILLR_Type<"Result"> {
-    let mnemonic = "result";
-    let summary = "A quantum measurement result.";
+  let mnemonic = "result";
+  let summary = "A quantum measurement result.";
 }
 
 def QILLR_MeasurementType : 1DTensorOf<[I1]>;
