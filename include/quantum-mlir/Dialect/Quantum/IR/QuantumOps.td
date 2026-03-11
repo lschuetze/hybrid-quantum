@@ -56,8 +56,18 @@ def Hermitian : NativeOpTrait<"Hermitian"> {
 }
 
 def Unitary : NativeOpTrait<"Unitary"> {
-    let cppNamespace = "::mlir::quantum";
+  let cppNamespace = "::mlir::quantum";
 }
+
+def Adjoint : NativeOpTrait<"Adjoint"> {
+  let cppNamespace = "::mlir::quantum";
+}
+
+class AdjointTo<string op>
+  : ParamNativeOpTrait<"AdjointTo", op> {
+  let cppNamespace = "::mlir::quantum";
+}
+
 
 //===----------------------------------------------------------------------===//
 // Quantum gate operations.
@@ -371,6 +381,7 @@ class PrimitiveGate_Op<string mnemonic, list<Trait> traits = []> :
 def Quantum_IdOp : PrimitiveGate_Op<
   "id",
   [
+    Hermitian,
     AllTypesMatch<["input", "result"]>,
     InferRegisterRangesInterface
   ]> {
@@ -447,6 +458,8 @@ def Quantum_ZOp : PrimitiveGate_Op<
 def Quantum_SOp : PrimitiveGate_Op<
   "S",
   [
+    Unitary,
+    AdjointTo<"SdgOp">,
     NoMemoryEffect,
     AllTypesMatch<["input", "result"]>,
     InferRegisterRangesInterface
@@ -463,6 +476,7 @@ def Quantum_SOp : PrimitiveGate_Op<
 def Quantum_SXOp : PrimitiveGate_Op<
   "SX",
   [
+    Unitary,
     NoMemoryEffect,
     AllTypesMatch<["input", "result"]>,
     InferRegisterRangesInterface
@@ -474,11 +488,14 @@ def Quantum_SXOp : PrimitiveGate_Op<
   }];
   let arguments = (ins Quantum_QubitType:$input);
   let results = (outs Quantum_QubitType:$result);
+  let hasCanonicalizeMethod = 1;
 }
 
 def Quantum_TOp : PrimitiveGate_Op<
   "T",
   [
+    Unitary,
+    AdjointTo<"TdgOp">,
     NoMemoryEffect,
     AllTypesMatch<["input", "result"]>,
     InferRegisterRangesInterface
@@ -495,6 +512,8 @@ def Quantum_TOp : PrimitiveGate_Op<
 def Quantum_SdgOp : PrimitiveGate_Op<
   "Sdg",
   [
+    Unitary,
+    AdjointTo<"SOp">,
     NoMemoryEffect,
     AllTypesMatch<["input", "result"]>,
     InferRegisterRangesInterface
@@ -511,6 +530,8 @@ def Quantum_SdgOp : PrimitiveGate_Op<
 def Quantum_TdgOp : PrimitiveGate_Op<
   "Tdg",
   [
+    Unitary,
+    AdjointTo<"TOp">,
     NoMemoryEffect,
     AllTypesMatch<["input", "result"]>,
     InferRegisterRangesInterface
@@ -556,6 +577,7 @@ def Quantum_CNOTOp : PrimitiveGate_Op<
 def Quantum_CZOp : PrimitiveGate_Op<
   "CZ",
   [
+    Hermitian,
     NoMemoryEffect,
     AllTypesMatch<["control", "target", "control_out", "target_out"]>,
     InferRegisterRangesInterface
@@ -743,6 +765,7 @@ def Quantum_CRzOp : PrimitiveGate_Op<
   }];
   let arguments = (ins Quantum_QubitType:$control, Quantum_QubitType:$target, F64:$angle);
   let results = (outs Quantum_QubitType:$control_out, Quantum_QubitType:$target_out);
+  let hasCanonicalizeMethod = 1;
 }
 
 def Quantum_CRyOp : PrimitiveGate_Op<
@@ -759,6 +782,7 @@ def Quantum_CRyOp : PrimitiveGate_Op<
   }];
   let arguments = (ins Quantum_QubitType:$control, Quantum_QubitType:$target, F64:$angle);
   let results = (outs Quantum_QubitType:$control_out, Quantum_QubitType:$target_out);
+  let hasCanonicalizeMethod = 1;
 }
 
 def Quantum_CU1Op : PrimitiveGate_Op<
@@ -783,6 +807,7 @@ def Quantum_CU1Op : PrimitiveGate_Op<
 def Quantum_CCXOp : PrimitiveGate_Op<
   "CCX",
   [
+    Hermitian,
     NoMemoryEffect,
     AllTypesMatch<["control1", "control2", "target", "control1_out", "control2_out", "target_out"]>,
     InferRegisterRangesInterface
