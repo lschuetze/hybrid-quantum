@@ -54,14 +54,19 @@ static LogicalResult walk(raw_ostream &os, qpu::CircuitOp op)
     CircuitMetrics metrics;
 
     auto walk = op->walk<WalkOrder::PreOrder>([&](Operation* child) {
+        // quantum::unitaries (includes hermitian) represent gates on qubits
         if (child->hasTrait<Hermitian>() || child->hasTrait<Unitary>()) {
             size_t qubitArgs = llvm::count_if(
                 child->getOperandTypes(),
                 [](Type ty) { return llvm::isa<QubitType>(ty); });
-            auto qty = llvm::dyn_cast_or_null<QubitType>(
-                child->getOperand(0).getType());
-            if (qty && qubitArgs == 1) metrics.single += qty.getSize();
-            if (qty && qubitArgs == 2) metrics.two += qty.getSize();
+            auto opTyIt = llvm::find_if(child->getOperandTypes(), [](Type ty) {
+                return llvm::isa<QubitType>(ty);
+            });
+            if (opTyIt != child->getOperandTypes().end()) {
+                auto qty = llvm::dyn_cast_or_null<QubitType>(*opTyIt);
+                if (qty && qubitArgs == 1) metrics.single += qty.getSize();
+                if (qty && qubitArgs == 2) metrics.two += qty.getSize();
+            }
         } else {
             metrics.other++;
         }
