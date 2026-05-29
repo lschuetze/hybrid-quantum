@@ -7,6 +7,7 @@
 #include "mlir/InitAllTranslations.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Tools/mlir-translate/MlirTranslateMain.h"
+#include "quantum-mlir/Target/circuit-metrics/QuantumCircuitMetrics.h"
 #include "quantum-mlir/Target/qasm/TargetQASM.h"
 
 using namespace mlir;
@@ -14,7 +15,10 @@ using namespace mlir;
 int main(int argc, char** argv)
 {
     registerAllTranslations();
+
     qillr::registerQILLRToOpenQASMTranslation();
+    quantum::registerQuantumCircuitMetrics();
+
     return failed(
         mlirTranslateMain(argc, argv, "MLIR Translation Testing Tool"));
 }
