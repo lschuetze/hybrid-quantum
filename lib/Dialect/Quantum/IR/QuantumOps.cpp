@@ -11,7 +11,6 @@
 #include "quantum-mlir/Dialect/Quantum/IR/QuantumTypes.h"
 #include "quantum-mlir/Dialect/Quantum/Interfaces/InferRegisterRangesInterface.h"
 
-#include <algorithm>
 #include <cstddef>
 #include <iterator>
 #include <llvm/ADT/APInt.h>
@@ -31,6 +30,7 @@
 #include <mlir/IR/Diagnostics.h>
 #include <mlir/IR/Matchers.h>
 #include <mlir/IR/OpDefinition.h>
+#include <mlir/IR/Operation.h>
 #include <mlir/IR/PatternMatch.h>
 #include <mlir/IR/Region.h>
 #include <mlir/IR/Value.h>

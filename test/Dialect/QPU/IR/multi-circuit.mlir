@@ -1,0 +1,32 @@
+// RUN: quantum-opt %s -split-input-file -inline
+
+qpu.module @test {
+    // CHECK-SAME
+    "qpu.circuit"() <{function_type = () -> (tensor<1xi1>), sym_name = "test_circuit1"}>({
+        ^bb0():
+        %q = "quantum.alloc"() : () -> (!quantum.qubit<1>)
+        %m, %qm = "quantum.measure"(%q) : (!quantum.qubit<1>) -> (!quantum.measurement<1>, !quantum.qubit<1>)
+        %mt = "quantum.to_tensor"(%m) : (!quantum.measurement<1>) -> (tensor<1xi1>)
+        "quantum.deallocate"(%qm) : (!quantum.qubit<1>) -> ()
+        "qpu.return"(%mt) : (tensor<1xi1>) -> ()
+    }) : () -> ()
+
+    // CHECK-SAME
+    "qpu.circuit"() <{function_type = () -> (tensor<1xi1>), sym_name = "test_circuit2"}>({
+        ^bb0():
+        %q = "quantum.alloc"() : () -> (!quantum.qubit<1>)
+        %qx = "quantum.X"(%q) : (!quantum.qubit<1>) -> (!quantum.qubit<1>)
+        %m, %qm = "quantum.measure"(%qx) : (!quantum.qubit<1>) -> (!quantum.measurement<1>, !quantum.qubit<1>)
+        %mt = "quantum.to_tensor"(%m) : (!quantum.measurement<1>) -> (tensor<1xi1>)
+        "quantum.deallocate"(%qm) : (!quantum.qubit<1>) -> ()
+        "qpu.return"(%mt) : (tensor<1xi1>) -> ()
+    }) : () -> ()
+}
+
+func.func @main() -> tensor<1xi1> {
+    %res = tensor.empty() : tensor<1xi1>
+    // CHECK-SAME
+    qpu.execute @test::@test_circuit1 args() outs(%res : tensor<1xi1>)
+    qpu.execute @test::@test_circuit2 args() outs(%res : tensor<1xi1>)
+    func.return %res : tensor<1xi1>
+}
