@@ -27,4 +27,13 @@ def HermitianCancel : Pass<"hermitian-cancel", "ModuleOp"> {
   let constructor = "mlir::quantum::createHermitianCancelPass()";
 }
 
+def PhasePolynomialMerge : Pass<"phase-poly-merge", "ModuleOp"> {
+  let summary = "Rotation gate merging based on phase polynomial analysis.";
+  
+  let description = [{
+  }];
+
+  let constructor = "mlir::quantum::createPhasePolynomialMergePass()";
+}
+
 #endif // QUANTUM_PASSES

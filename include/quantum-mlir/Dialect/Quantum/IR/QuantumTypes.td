@@ -14,11 +14,17 @@ include "mlir/IR/BuiltinTypeInterfaces.td"
 def Quantum_QubitType : Quantum_Type<"Qubit"> {
   let mnemonic = "qubit";
   let summary = "Multi-qubit register type";
-  let parameters = (ins "int64_t":$size);
+  
+  let parameters = (ins
+    "int64_t":$size
+  );
+
   let assemblyFormat = "`<` $size `>`";
+
   let extraClassDeclaration = [{
     bool isSingleQubit() const;
   }];
+
   let genVerifyDecl = 1;
 }
 

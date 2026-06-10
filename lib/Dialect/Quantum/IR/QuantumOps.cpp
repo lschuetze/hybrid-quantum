@@ -7,8 +7,11 @@
 
 #include "mlir/Interfaces/FunctionImplementation.h"
 #include "mlir/Transforms/InliningUtils.h"
+#include "quantum-mlir/Dialect/QPU/IR/QPUAttributes.h"
+#include "quantum-mlir/Dialect/QPU/IR/QPUOps.h"
 #include "quantum-mlir/Dialect/Quantum/IR/QuantumAttributes.h"
 #include "quantum-mlir/Dialect/Quantum/IR/QuantumTypes.h"
+#include "quantum-mlir/Dialect/Quantum/Interfaces/InferPhasePolynomialInterface.h"
 #include "quantum-mlir/Dialect/Quantum/Interfaces/InferRegisterRangesInterface.h"
 
 #include <cstddef>
@@ -112,7 +115,7 @@ struct QuantumInlinerInterface : public DialectInlinerInterface {
 } // namespace
 
 //===--------------------------------------------------------------------===//
-// InterRegisterRangesInterface Hooks
+// InferRegisterRangesInterface Hooks
 //===--------------------------------------------------------------------===//
 
 void AllocOp::inferResultRanges(
@@ -165,6 +168,47 @@ void MeasureOp::inferResultRanges(
     SetRangeFn setResultRanges)
 {
     setResultRanges(getResult(), argRanges[0]);
+}
+
+//===--------------------------------------------------------------------===//
+// InferPhasePolynomialInterface Hooks
+//===--------------------------------------------------------------------===//
+
+void AllocOp::inferResultPolynomial(
+    [[maybe_unused]] ArrayRef<PhasePolynomial> argPolynomials,
+    SetPolynomialFn setResultPolynomials)
+{
+    auto module = getOperation()->getParentOfType<qpu::QPUModuleOp>();
+    auto targets = module.getTargetsAttr();
+    if (!targets) {
+        getOperation()->emitError()
+            << "expected qpu.module to have a 'targets' attribute";
+        return;
+    }
+    auto target = llvm::dyn_cast<qpu::TargetAttr>(targets[0]);
+    size_t qubitCount = target.getQubits().getInt();
+    size_t allocatedQubitsBegin = getPos().value();
+    size_t allocatedQubitsEnd =
+        allocatedQubitsBegin + getResult().getType().getSize();
+    ConstantPhasePolynomial localResult(qubitCount, 0);
+    for (size_t i = allocatedQubitsBegin; i < allocatedQubitsEnd; ++i)
+        localResult.setBit(i);
+    PhasePolynomial resultPoly(localResult);
+    setResultPolynomials(getResult(), resultPoly);
+}
+
+void CNOTOp::inferResultPolynomial(
+    ArrayRef<PhasePolynomial> argPolynomials,
+    SetPolynomialFn setResultPolynomials)
+{
+    PhasePolynomial controlPoly = argPolynomials[0];
+    PhasePolynomial targetPoly = argPolynomials[1];
+
+    PhasePolynomial targetOutPoly =
+        PhasePolynomial::meet(controlPoly.getValue(), targetPoly.getValue());
+
+    setResultPolynomials(getControlOut(), controlPoly);
+    setResultPolynomials(getTargetOut(), targetOutPoly);
 }
 
 //===----------------------------------------------------------------------===//
@@ -308,7 +352,7 @@ LogicalResult SXOp::canonicalize(SXOp op, PatternRewriter &rewriter)
 template<typename ConcreteType>
 LogicalResult foldHermitianTraitImpl(
     Operation* op,
-    ArrayRef<Attribute> operands,
+    [[maybe_unused]] ArrayRef<Attribute> operands,
     SmallVectorImpl<OpFoldResult> &results)
 {
     // OUT11, ... , OUT1n = OP(IN1, ..., INn)
@@ -342,7 +386,7 @@ LogicalResult Hermitian<ConcreteType>::foldTrait(
 template<typename ConcreteType>
 LogicalResult foldUnitaryTraitImpl(
     Operation* op,
-    ArrayRef<Attribute> operands,
+    [[maybe_unused]] ArrayRef<Attribute> operands,
     SmallVectorImpl<OpFoldResult> &results)
 {
     if (op->getNumOperands() == 1) {

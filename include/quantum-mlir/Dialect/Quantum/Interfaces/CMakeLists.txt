@@ -1,1 +1,2 @@
 mlir_gen_iface(Quantum InferRegisterRangesInterface op)
+mlir_gen_iface(Quantum InferPhasePolynomialInterface op)
