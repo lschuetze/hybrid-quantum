@@ -409,7 +409,10 @@ def Quantum_HOp : PrimitiveGate_Op<
     Hermitian,
     NoMemoryEffect,
     AllTypesMatch<["input", "result"]>,
-    InferRegisterRangesInterface
+    InferRegisterRangesInterface,
+    DeclareOpInterfaceMethods<
+      InferPhasePolynomialInterface, ["inferResultPolynomial"]
+    >
   ]> {
   let summary = "Hadamard gate operation";
   let description = [{

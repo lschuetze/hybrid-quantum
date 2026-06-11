@@ -28,6 +28,11 @@ public:
               epochVal(epoch)
     {}
 
+    ConstantPhasePolynomial(const ConstantPhasePolynomial &other)
+            : parityVal(other.parityVal),
+              epochVal(other.epochVal)
+    {}
+
     bool operator==(const ConstantPhasePolynomial &other) const;
 
     ConstantPhasePolynomial
@@ -44,6 +49,8 @@ public:
     void setBit(size_t index) { parityVal.set(index); }
 
     unsigned getEpoch() const;
+
+    void setEpoch(unsigned epoch) { epochVal = epoch; }
 
     friend llvm::raw_ostream &operator<<(
         llvm::raw_ostream &os,
@@ -101,6 +108,8 @@ public:
         if (rhs.isUninitialized()) return lhs;
         return PhasePolynomial{lhs.getValue().parityXor(rhs.getValue())};
     }
+
+    static PhasePolynomial nextEpoche(const PhasePolynomial &other) {}
 
 private:
     /// The known phase polynomial.

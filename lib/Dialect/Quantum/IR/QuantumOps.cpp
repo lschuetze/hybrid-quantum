@@ -211,6 +211,17 @@ void CNOTOp::inferResultPolynomial(
     setResultPolynomials(getTargetOut(), targetOutPoly);
 }
 
+void HOp::inferResultPolynomial(
+    ArrayRef<PhasePolynomial> argPolynomials,
+    SetPolynomialFn setResultPolynomials)
+{
+    ConstantPhasePolynomial resultPoly(argPolynomials[0].getValue());
+    resultPoly.setEpoch(resultPoly.getEpoch() + 1);
+
+    PhasePolynomial result(resultPoly);
+    setResultPolynomials(getResult(), result);
+}
+
 //===----------------------------------------------------------------------===//
 // Canonicalization
 //===----------------------------------------------------------------------===//
@@ -276,7 +287,8 @@ LogicalResult rotationOpCanonicalize(OpTy op, PatternRewriter &rewriter)
     // --------------------
     // %1 = R_(%0, %theta1 + %theta2)
     if (auto otherRotation = op.getInput().template getDefiningOp<OpTy>()) {
-        // addf either folds the constant folded values or the result of addf
+        // addf either folds the constant folded values or the result of
+        // addf
         llvm::SmallVector<Value, 2> addfv;
         rewriter.createOrFold<arith::AddFOp>(
             addfv,
