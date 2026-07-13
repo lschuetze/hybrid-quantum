@@ -108,3 +108,48 @@ qpu.module @test [#qpu.target<qubits = 3, coupling = [[0, 1], [1, 2]]>] {
 }) : () -> ()
 }
 }
+
+// -----
+
+// CHECK: module {
+module {
+// CHECK: qpu.module @test
+qpu.module @test [#qpu.target<qubits = 3, coupling = [[0, 1], [1, 2]]>] {
+  // CHECK: "qpu.circuit"() <{function_type = (f64, f64) -> (), sym_name = "rz_diff_wires_cancelling"}> ({
+"qpu.circuit"() <{function_type = (f64, f64) -> (), sym_name = "rz_diff_wires_cancelling"}>({
+  // CHECK: ^bb0(%[[T1:.+]]: {{.*}}, %[[T2:.+]]: {{.*}}):
+  ^bb0(%theta1: f64, %theta2: f64):
+
+  // CHECK: %[[X0:.+]] = "quantum.alloc"() <{pos = 0 : i32}> : () -> !quantum.qubit<1>
+  %x0 = "quantum.alloc"() <{pos = 0 : i32}> : () -> !quantum.qubit<1>
+  // CHECK: %[[Y0:.+]] = "quantum.alloc"() <{pos = 1 : i32}> : () -> !quantum.qubit<1>
+  %y0 = "quantum.alloc"() <{pos = 1 : i32}> : () -> !quantum.qubit<1>
+
+  // CHECK: %[[X1:.+]], %[[Y1:.+]] = "quantum.CNOT"(%[[X0]], %[[Y0]]) : (!quantum.qubit<1>, !quantum.qubit<1>) -> (!quantum.qubit<1>, !quantum.qubit<1>)
+  %x1, %y1 = "quantum.CNOT"(%x0, %y0) : (!quantum.qubit<1>, !quantum.qubit<1>) -> (!quantum.qubit<1>, !quantum.qubit<1>)
+
+  // CHECK: %[[P:.+]] = arith.addf %[[T1]], %[[T2]] : f64
+  // CHECK: %[[Y2:.+]] = "quantum.Rz"(%[[Y1]], %[[P]]) : (!quantum.qubit<1>, f64) -> !quantum.qubit<1>
+  %y2 = "quantum.Rz"(%y1, %theta1) : (!quantum.qubit<1>, f64) -> !quantum.qubit<1>
+
+  // CHECK: %[[X3:.+]], %[[Y3:.+]] = "quantum.CNOT"(%[[X1]], %[[Y2]]) : (!quantum.qubit<1>, !quantum.qubit<1>) -> (!quantum.qubit<1>, !quantum.qubit<1>)
+  %x3, %y3 = "quantum.CNOT"(%x1, %y2) : (!quantum.qubit<1>, !quantum.qubit<1>) -> (!quantum.qubit<1>, !quantum.qubit<1>)
+
+  // CHECK: %[[Y4:.+]], %[[X4:.+]] = "quantum.CNOT"(%[[Y3]], %[[X3]]) : (!quantum.qubit<1>, !quantum.qubit<1>) -> (!quantum.qubit<1>, !quantum.qubit<1>)
+  %y4, %x4 = "quantum.CNOT"(%y3, %x3) : (!quantum.qubit<1>, !quantum.qubit<1>) -> (!quantum.qubit<1>, !quantum.qubit<1>)
+
+  // CHECK-NOT: %[[X5:.+]] = "quantum.Rz"(%[[X4]], %[[T2]]) : (!quantum.qubit<1>, f64) -> !quantum.qubit<1>
+  %x5 = "quantum.Rz"(%x4, %theta2) : (!quantum.qubit<1>, f64) -> !quantum.qubit<1>
+
+  // CHECK: %[[Y6:.+]], %[[X6:.+]] = "quantum.CNOT"(%[[Y4]], %[[X4]]) : (!quantum.qubit<1>, !quantum.qubit<1>) -> (!quantum.qubit<1>, !quantum.qubit<1>)
+  %y6, %x6 = "quantum.CNOT"(%y4, %x5) : (!quantum.qubit<1>, !quantum.qubit<1>) -> (!quantum.qubit<1>, !quantum.qubit<1>) 
+
+  // CHECK: "quantum.deallocate"(%[[X6]])
+  "quantum.deallocate"(%x6) : (!quantum.qubit<1>) -> ()
+  // CHECK: "quantum.deallocate"(%[[Y6]])
+  "quantum.deallocate"(%y6) : (!quantum.qubit<1>) -> ()  
+
+  "qpu.return" () : () -> ()
+}) : () -> ()
+}
+}
