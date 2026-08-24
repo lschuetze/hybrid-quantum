@@ -9,6 +9,7 @@
 #include "mlir/Pass/Pass.h"
 
 #include <memory>
+#include <mlir/Analysis/DataFlowFramework.h>
 #include <mlir/Transforms/OneToNTypeConversion.h>
 
 namespace mlir {
@@ -37,6 +38,8 @@ std::unique_ptr<Pass> createQuantumOptimisePass();
 std::unique_ptr<Pass> createHermitianCancelPass();
 
 std::unique_ptr<Pass> createScfToRVSDGPass();
+
+std::unique_ptr<Pass> createPhasePolynomialMergePass();
 
 //===----------------------------------------------------------------------===//
 // Registration

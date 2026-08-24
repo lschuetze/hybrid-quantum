@@ -8,7 +8,6 @@ add_mlir_dialect_library(QPUIR
         QPUIncGen
 
     LINK_LIBS PUBLIC
-        QuantumIR
         MLIRIR
         MLIRParser
         MLIRSideEffectInterfaces

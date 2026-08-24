@@ -18,7 +18,7 @@ def SabreSwap : Pass<"sabre-swap", "QPUModuleOp"> {
     let constructor = "mlir::qpu::createSabreSwapPass()";
 
     let dependentDialects = [
-        "quantum::QuantumDialect"
+        //"quantum::QuantumDialect"
     ];
 }
 

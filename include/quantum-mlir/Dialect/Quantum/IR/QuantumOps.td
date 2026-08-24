@@ -9,6 +9,7 @@
 
 include "quantum-mlir/Dialect/Quantum/IR/QuantumTypes.td"
 include "quantum-mlir/Dialect/Quantum/Interfaces/InferRegisterRangesInterface.td"
+include "quantum-mlir/Dialect/Quantum/Interfaces/InferPhasePolynomialInterface.td"
 include "mlir/Interfaces/CastInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/IR/SymbolInterfaces.td"
@@ -231,6 +232,9 @@ def Quantum_AllocOp : Memory_Op<
     NoClone,
     DeclareOpInterfaceMethods<
       InferRegisterRangesInterface, ["inferResultRanges"]
+    >,
+    DeclareOpInterfaceMethods<
+      InferPhasePolynomialInterface, ["inferResultPolynomial"]
     >
   ]> {
   let summary = "Allocate n qubits into a quantum register.";
@@ -243,6 +247,10 @@ def Quantum_AllocOp : Memory_Op<
     %q0 = quantum.alloc : !quantum.qubit<5>
     ```
   }];
+
+  let arguments = (ins
+    OptionalAttr<ConfinedAttr<I32Attr, [IntNonNegative]>>:$pos
+  );
 
   let results = (outs Quantum_QubitType:$result);
 }
@@ -283,7 +291,8 @@ def Quantum_ResetOp : Memory_Op<
       MemRead,
       MemWrite
     ]>,
-    InferRegisterRangesInterface
+    InferRegisterRangesInterface,
+    InferPhasePolynomialInterface
   ]> {
     let summary = "Reset a quantum register.";
     let description = [{
@@ -316,6 +325,9 @@ def Quantum_SplitOp : Memory_Op<
     NoClone,
     DeclareOpInterfaceMethods<
       InferRegisterRangesInterface, ["inferResultRanges"]
+    >,
+    DeclareOpInterfaceMethods<
+      InferPhasePolynomialInterface, ["inferResultPolynomial"]
     >
   ]> {
     let summary = "Split a qubit register into two sub-registers.";
@@ -383,7 +395,8 @@ def Quantum_IdOp : PrimitiveGate_Op<
   [
     Hermitian,
     AllTypesMatch<["input", "result"]>,
-    InferRegisterRangesInterface
+    InferRegisterRangesInterface,
+    InferPhasePolynomialInterface
   ]> {
   let summary = "Identity gate operation";
   let description = [{
@@ -401,7 +414,10 @@ def Quantum_HOp : PrimitiveGate_Op<
     Hermitian,
     NoMemoryEffect,
     AllTypesMatch<["input", "result"]>,
-    InferRegisterRangesInterface
+    InferRegisterRangesInterface,
+    DeclareOpInterfaceMethods<
+      InferPhasePolynomialInterface, ["inferResultPolynomial"]
+    >
   ]> {
   let summary = "Hadamard gate operation";
   let description = [{
@@ -419,7 +435,8 @@ def Quantum_XOp : PrimitiveGate_Op<
     Hermitian,
     NoMemoryEffect,
     AllTypesMatch<["input", "result"]>,
-    InferRegisterRangesInterface
+    InferRegisterRangesInterface,
+    InferPhasePolynomialInterface
   ]>{
   let summary = "X gate operation (NOT gate)";
   let description = [{%out = "quantum.X"(%qubit) : !quantum.qubit<1> -> !quantum.qubit<1>}]; 
@@ -554,7 +571,10 @@ def Quantum_CNOTOp : PrimitiveGate_Op<
     Hermitian,
     NoMemoryEffect,
     AllTypesMatch<["input", "target", "control_out", "target_out"]>,
-    InferRegisterRangesInterface
+    InferRegisterRangesInterface,
+    DeclareOpInterfaceMethods<
+      InferPhasePolynomialInterface, ["inferResultPolynomial"]
+    >
   ]> {
   let summary = "CNOT gate operation";
   let description = [{
@@ -596,7 +616,10 @@ def Quantum_SWAPOp : PrimitiveGate_Op<
   [
     Hermitian,
     AllTypesMatch<[ "lhs", "rhs","result_lhs", "result_rhs"]>,
-    InferRegisterRangesInterface
+    InferRegisterRangesInterface,
+    DeclareOpInterfaceMethods<
+      InferPhasePolynomialInterface, ["inferResultPolynomial"]
+    >
   ]> {
   let summary = "SWAP gate";
   let description = [{
@@ -667,7 +690,8 @@ def Quantum_RzOp : PrimitiveGate_Op<
     Unitary,
     NoMemoryEffect,
     AllTypesMatch<["input", "result"]>,
-    InferRegisterRangesInterface
+    InferRegisterRangesInterface,
+    InferPhasePolynomialInterface
   ]> {
   let summary = "z rotation gate operation";
   let description = [{
@@ -858,7 +882,10 @@ def Quantum_BarrierOp : PrimitiveGate_Op<
   "barrier",
   [
     AllTypesMatch<["input", "result"]>,
-    InferRegisterRangesInterface
+    InferRegisterRangesInterface,
+    DeclareOpInterfaceMethods<
+      InferPhasePolynomialInterface, ["inferResultPolynomial"]
+    >
   ]> {
   let summary = "Barrier operation";
   let description = [{

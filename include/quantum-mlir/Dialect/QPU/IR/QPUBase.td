@@ -29,7 +29,7 @@ def QPU_Dialect : Dialect {
     //let useDefaultTypePrinterParser = 1;
 
     let dependentDialects = [
-        "::mlir::quantum::QuantumDialect"
+        //"::mlir::quantum::QuantumDialect"
     ];
 
     code extraClassDeclaration = [{
