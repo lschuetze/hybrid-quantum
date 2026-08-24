@@ -11,12 +11,14 @@
 #include "quantum-mlir/Dialect/Quantum/Interfaces/InferPhasePolynomialInterface.h"
 #include "quantum-mlir/Dialect/Quantum/Transforms/Passes.h"
 
+#include <cstdint>
 #include <llvm/ADT/APFloat.h>
 #include <llvm/Support/Debug.h>
 #include <mlir/Analysis/DataFlow/ConstantPropagationAnalysis.h>
 #include <mlir/Analysis/DataFlow/DeadCodeAnalysis.h>
 #include <mlir/Analysis/DataFlow/SparseAnalysis.h>
 #include <mlir/IR/Builders.h>
+#include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/BuiltinOps.h>
 #include <mlir/Pass/Pass.h>
 
@@ -74,12 +76,23 @@ void PhasePolynomialMergePass::runOnOperation()
     solver.load<mlir::dataflow::SparseConstantPropagation>();
     solver.load<quantum::dataflow::PhasePolynomialAnalysis>();
 
-    llvm::DenseMap<ConstantPhasePolynomial, SmallVector<RzOp>> groups;
+    llvm::DenseMap<SmallVector<ConstantPhasePolynomial>, SmallVector<RzOp>>
+        groups;
 
     // Each qpu::circuit is the root of a quantum circuit
     // Run analysis on each circuit and collect operations with same-valued
     // epochs and parity bits
     getOperation().walk([&](qpu::CircuitOp circOp) {
+        // Workaround: assign each allocop a position
+        size_t nqubits = 0;
+        circOp->walk([&](quantum::AllocOp allocOp) {
+            allocOp.setPosAttr(
+                IntegerAttr::get(
+                    IntegerType::get(allocOp.getContext(), 32),
+                    nqubits));
+            nqubits += allocOp.getResult().getType().getSize();
+        });
+
         if (failed(solver.initializeAndRun(circOp))) return signalPassFailure();
 
         LLVM_DEBUG(
@@ -98,7 +111,7 @@ void PhasePolynomialMergePass::runOnOperation()
                 llvm::dbgs() << "[PhasePolyMerge]: Collect "
                              << lattice->getValue() << " for " << rzop << "\n");
 
-            ConstantPhasePolynomial key = lattice->getValue().getValue();
+            auto key = lattice->getValue().getValue();
             groups[key].push_back(rzop);
         });
     });
@@ -108,7 +121,7 @@ void PhasePolynomialMergePass::runOnOperation()
         if (ops.size() < 2) {
             LLVM_DEBUG(
                 llvm::dbgs() << "[PhasePolyMerge]: Ignore operation " << ops[0]
-                             << " with " << poly << "\n");
+                             << " with " << poly[0] << "\n");
             continue;
         }
 

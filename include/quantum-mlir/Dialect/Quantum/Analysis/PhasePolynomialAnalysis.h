@@ -32,7 +32,9 @@ class PhasePolynomialAnalysis
         : public mlir::dataflow::SparseForwardDataFlowAnalysis<
               PhasePolynomialLattice> {
 public:
-    using SparseForwardDataFlowAnalysis::SparseForwardDataFlowAnalysis;
+    explicit PhasePolynomialAnalysis(DataFlowSolver &solver)
+            : SparseForwardDataFlowAnalysis(solver)
+    {}
 
     /// At an entry point, we cannot reason about phase polynomials.
     void setToEntryState(PhasePolynomialLattice* lattice) override

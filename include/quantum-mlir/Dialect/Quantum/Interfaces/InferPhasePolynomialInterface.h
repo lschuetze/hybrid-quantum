@@ -13,7 +13,11 @@
 
 #include "mlir/IR/OpDefinition.h"
 
+#include <cstddef>
 #include <llvm/ADT/BitVector.h>
+#include <llvm/ADT/Hashing.h>
+#include <llvm/ADT/STLExtras.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/Support/raw_ostream.h>
 #include <mlir/IR/Value.h>
 #include <mlir/Support/LLVM.h>
@@ -26,11 +30,6 @@ public:
     ConstantPhasePolynomial(const unsigned qubitCount, const unsigned epoch = 0)
             : parityVal(qubitCount, false),
               epochVal(epoch)
-    {}
-
-    ConstantPhasePolynomial(const ConstantPhasePolynomial &other)
-            : parityVal(other.parityVal),
-              epochVal(other.epochVal)
     {}
 
     bool operator==(const ConstantPhasePolynomial &other) const;
@@ -46,7 +45,11 @@ public:
 
     const llvm::BitVector &getParity() const;
 
+    void reset() { parityVal.reset(); }
+
     void setBit(size_t index) { parityVal.set(index); }
+
+    void setBit(size_t start, size_t end) { parityVal.set(start, end); }
 
     unsigned getEpoch() const;
 
@@ -55,6 +58,16 @@ public:
     friend llvm::raw_ostream &operator<<(
         llvm::raw_ostream &os,
         const ConstantPhasePolynomial &polynomial);
+
+    friend llvm::hash_code hash_value(const ConstantPhasePolynomial &p)
+    {
+        auto h = llvm::hash_value(p.getEpoch());
+
+        for (auto word : p.getParity().getData())
+            h = llvm::hash_combine(h, word);
+
+        return static_cast<unsigned>(h);
+    }
 
 private:
     llvm::BitVector parityVal;
@@ -65,31 +78,50 @@ llvm::raw_ostream &
 operator<<(llvm::raw_ostream &, const ConstantPhasePolynomial &);
 
 /// This lattice value represents the phase polynomial of an SSA value.
+/// Since !quantum.qubit<N> may be an N-valued qubit register it holds
+/// N polynomials.
 class PhasePolynomial {
 public:
     PhasePolynomial() = default;
 
     /// Create a phase polynomial lattice value
-    PhasePolynomial(ConstantPhasePolynomial value) : value(std::move(value)) {}
+    PhasePolynomial(ConstantPhasePolynomial value, size_t qubit)
+    {
+        values.push_back(value);
+        qubitPos.push_back(qubit);
+    }
+
+    PhasePolynomial(
+        llvm::SmallVector<ConstantPhasePolynomial> vals,
+        llvm::SmallVector<size_t> qubits)
+    {
+        values.append(vals.begin(), vals.end());
+        qubitPos.append(qubits.begin(), qubits.end());
+    }
 
     /// Check whether the state is uninitialized
-    bool isUninitialized() const { return !value.has_value(); }
+    bool isUninitialized() const { return values.empty(); }
+
+    llvm::SmallVector<size_t> getQubit() const { return qubitPos; }
 
     /// Get the known phase polynomial.
-    const ConstantPhasePolynomial &getValue() const
+    const llvm::SmallVector<ConstantPhasePolynomial> &getValue() const
     {
         assert(!isUninitialized());
-        return *value;
+        return values;
     }
 
     /// Compare two phase polynomials.
     bool operator==(const PhasePolynomial &rhs) const
     {
-        return value == rhs.value;
+        return values == rhs.values;
     }
 
     /// Print the phase polynomial
-    void print(llvm::raw_ostream &os) const { os << value; }
+    void print(llvm::raw_ostream &os) const
+    {
+        for (ConstantPhasePolynomial c : values) os << c;
+    }
 
     /// Compute the combination of two phase polynomials
     static PhasePolynomial
@@ -97,7 +129,14 @@ public:
     {
         if (lhs.isUninitialized()) return rhs;
         if (rhs.isUninitialized()) return lhs;
-        return PhasePolynomial{lhs.getValue().parityOr(rhs.getValue())};
+
+        assert(lhs.qubitPos == rhs.qubitPos);
+
+        llvm::SmallVector<ConstantPhasePolynomial> joinedVals;
+        for (auto &&[lval, rval] : llvm::zip_equal(lhs.values, rhs.values))
+            joinedVals.emplace_back(lval.parityOr(rval));
+
+        return PhasePolynomial(joinedVals, lhs.qubitPos);
     }
 
     /// Compute the symmetric difference of two phase polynomials
@@ -106,14 +145,18 @@ public:
     {
         if (lhs.isUninitialized()) return rhs;
         if (rhs.isUninitialized()) return lhs;
-        return PhasePolynomial{lhs.getValue().parityXor(rhs.getValue())};
+
+        llvm::SmallVector<ConstantPhasePolynomial> meetVals;
+        for (auto &&[lval, rval] : llvm::zip_equal(lhs.values, rhs.values))
+            meetVals.emplace_back(lval.parityXor(rval));
+
+        return PhasePolynomial(meetVals, rhs.qubitPos);
     }
 
-    static PhasePolynomial nextEpoche(const PhasePolynomial &other) {}
-
 private:
-    /// The known phase polynomial.
-    std::optional<ConstantPhasePolynomial> value;
+    /// The known phase polynomials.
+    llvm::SmallVector<ConstantPhasePolynomial> values;
+    llvm::SmallVector<size_t> qubitPos;
 };
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &, const PhasePolynomial &);
@@ -138,31 +181,31 @@ void defaultInferResultPolynomial(
 namespace llvm {
 
 template<>
-struct DenseMapInfo<mlir::quantum::ConstantPhasePolynomial> {
-    static mlir::quantum::ConstantPhasePolynomial getEmptyKey()
+struct DenseMapInfo<llvm::SmallVector<mlir::quantum::ConstantPhasePolynomial>> {
+    static llvm::SmallVector<mlir::quantum::ConstantPhasePolynomial>
+    getEmptyKey()
     {
-        return mlir::quantum::ConstantPhasePolynomial(0, ~0u);
+        return llvm::SmallVector<mlir::quantum::ConstantPhasePolynomial>{
+            mlir::quantum::ConstantPhasePolynomial(0, ~0u)};
     }
 
-    static mlir::quantum::ConstantPhasePolynomial getTombstoneKey()
+    static llvm::SmallVector<mlir::quantum::ConstantPhasePolynomial>
+    getTombstoneKey()
     {
-        return mlir::quantum::ConstantPhasePolynomial(0, ~0u - 1);
+        return llvm::SmallVector<mlir::quantum::ConstantPhasePolynomial>{
+            mlir::quantum::ConstantPhasePolynomial(0, ~0u - 1)};
     }
 
-    static unsigned
-    getHashValue(const mlir::quantum::ConstantPhasePolynomial &v)
+    static unsigned getHashValue(
+        const llvm::SmallVector<mlir::quantum::ConstantPhasePolynomial> &v)
     {
-        llvm::hash_code h = llvm::hash_value(v.getEpoch());
-
-        for (auto word : v.getParity().getData())
-            h = llvm::hash_combine(h, word);
-
+        auto h = llvm::hash_combine_range(v.begin(), v.end());
         return static_cast<unsigned>(h);
     }
 
     static bool isEqual(
-        const mlir::quantum::ConstantPhasePolynomial &lhs,
-        const mlir::quantum::ConstantPhasePolynomial &rhs)
+        const llvm::SmallVector<mlir::quantum::ConstantPhasePolynomial> &lhs,
+        const llvm::SmallVector<mlir::quantum::ConstantPhasePolynomial> &rhs)
     {
         return lhs == rhs;
     }

@@ -14,6 +14,7 @@
 #include "quantum-mlir/Dialect/Quantum/Interfaces/InferPhasePolynomialInterface.h"
 #include "quantum-mlir/Dialect/Quantum/Interfaces/InferRegisterRangesInterface.h"
 
+#include <array>
 #include <cstddef>
 #include <iterator>
 #include <llvm/ADT/APInt.h>
@@ -41,6 +42,7 @@
 #include <mlir/Support/LLVM.h>
 #include <mlir/Support/LogicalResult.h>
 #include <optional>
+#include <vector>
 
 #define DEBUG_TYPE "quantum-ops"
 
@@ -187,13 +189,21 @@ void AllocOp::inferResultPolynomial(
     }
     auto target = llvm::dyn_cast<qpu::TargetAttr>(targets[0]);
     size_t qubitCount = target.getQubits().getInt();
+
     size_t allocatedQubitsBegin = getPos().value();
     size_t allocatedQubitsEnd =
         allocatedQubitsBegin + getResult().getType().getSize();
-    ConstantPhasePolynomial localResult(qubitCount, 0);
-    for (size_t i = allocatedQubitsBegin; i < allocatedQubitsEnd; ++i)
+
+    llvm::SmallVector<ConstantPhasePolynomial> values;
+    llvm::SmallVector<size_t> qubits;
+    for (size_t i = allocatedQubitsBegin; i < allocatedQubitsEnd; ++i) {
+        ConstantPhasePolynomial localResult(qubitCount, 0);
         localResult.setBit(i);
-    PhasePolynomial resultPoly(localResult);
+        values.push_back(localResult);
+        qubits.push_back(i);
+    }
+
+    PhasePolynomial resultPoly(values, qubits);
     setResultPolynomials(getResult(), resultPoly);
 }
 
@@ -205,7 +215,7 @@ void CNOTOp::inferResultPolynomial(
     PhasePolynomial targetPoly = argPolynomials[1];
 
     PhasePolynomial targetOutPoly =
-        PhasePolynomial::meet(controlPoly.getValue(), targetPoly.getValue());
+        PhasePolynomial::meet(controlPoly, targetPoly);
 
     setResultPolynomials(getControlOut(), controlPoly);
     setResultPolynomials(getTargetOut(), targetOutPoly);
@@ -215,11 +225,68 @@ void HOp::inferResultPolynomial(
     ArrayRef<PhasePolynomial> argPolynomials,
     SetPolynomialFn setResultPolynomials)
 {
-    ConstantPhasePolynomial resultPoly(argPolynomials[0].getValue());
-    resultPoly.setEpoch(resultPoly.getEpoch() + 1);
+    /// H resets the phase polynomial to its qubits
+    auto resultPoly = argPolynomials[0].getValue();
+    auto qubits = argPolynomials[0].getQubit();
+    for (auto &&[poly, i] : llvm::zip_equal(resultPoly, qubits)) {
+        poly.reset();
+        poly.setBit(i);
+        poly.setEpoch(poly.getEpoch() + 1);
+    }
 
-    PhasePolynomial result(resultPoly);
+    PhasePolynomial result(resultPoly, qubits);
     setResultPolynomials(getResult(), result);
+}
+
+void BarrierOp::inferResultPolynomial(
+    ArrayRef<PhasePolynomial> argPolynomials,
+    SetPolynomialFn setResultPolynomials)
+{
+    /// H resets the phase polynomial to its qubits
+    for (size_t idx = 0; idx < getNumResults(); ++idx) {
+        auto resultPoly = argPolynomials[idx].getValue();
+        auto qubits = argPolynomials[idx].getQubit();
+        for (auto &&[poly, i] : llvm::zip_equal(resultPoly, qubits)) {
+            poly.reset();
+            poly.setBit(i);
+            poly.setEpoch(poly.getEpoch() + 1);
+        }
+
+        PhasePolynomial result(resultPoly, qubits);
+        auto val = getResults()[idx];
+        setResultPolynomials(val, result);
+    }
+}
+
+void SplitOp::inferResultPolynomial(
+    ArrayRef<PhasePolynomial> argPolynomials,
+    SetPolynomialFn setResultPolynomials)
+{
+    auto poly = argPolynomials[0].getValue();
+    auto qubits = argPolynomials[0].getQubit();
+    //  len(poly) == cnt(qubits)
+    size_t start = 0;
+    for (auto result : getResults()) {
+        size_t len = llvm::cast<QubitType>(result.getType()).getSize();
+        // take the slice [start,end]
+        llvm::SmallVector<ConstantPhasePolynomial> resultPoly(
+            poly.begin() + start,
+            poly.begin() + start + len);
+        llvm::SmallVector<size_t> resultQubits(
+            qubits.begin() + start,
+            qubits.begin() + start + len);
+        setResultPolynomials(result, PhasePolynomial{resultPoly, resultQubits});
+        start += len;
+    }
+}
+
+void SWAPOp::inferResultPolynomial(
+    ArrayRef<PhasePolynomial> argPolynomials,
+    SetPolynomialFn setResultPolynomials)
+{
+    // SWAP(a,b) = b,a
+    setResultPolynomials(getResultLhs(), argPolynomials[1]);
+    setResultPolynomials(getResultRhs(), argPolynomials[0]);
 }
 
 //===----------------------------------------------------------------------===//
